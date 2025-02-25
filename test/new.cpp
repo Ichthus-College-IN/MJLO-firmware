@@ -1,0 +1,25 @@
+#include <Arduino.h>
+
+enum DeviceStates {
+  WAKEUP,
+  GNSS_START,
+  WAIT_SATELLITE,
+  READ_DIP,
+  START_SENSORS,
+  WAIT_FIX,
+  SEND_GNSS_SENSORS,
+  WAIT_NO_MOTION,
+  SEND_CONFIRMED,
+  SEND_SENSORS_ADR,
+  DISPLAY_MEAS,
+  SLEEP,
+};
+
+DeviceStates deviceState;
+
+enum MessageTypes {
+  JOIN,
+  GNSS_SENSORS,
+  CONF_ADR,
+  UNCONF_SENSORS
+};
