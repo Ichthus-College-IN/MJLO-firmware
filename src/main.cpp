@@ -12,7 +12,7 @@
 #include <Adafruit_TSL2591.h>
 #include <Adafruit_VEML6070.h>
 #include <Adafruit_BME680.h>
-#include "SensirionI2CScd4x.h"
+#include <SensirionI2CScd4x.h>
 #include <SensirionI2CSen5x.h>
 
 #include <Adafruit_GFX.h>
@@ -28,12 +28,13 @@
 #include "soundsensor.h"
 #include "measurement.h"
 #include "fs_browser.h"
+#include "serial.h"
 
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFTEPD_DC, TFTEPD_MOSI, TFTEPD_SCK, TFTEPD_RST);
 Adafruit_TSL2591 tsl = Adafruit_TSL2591();
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_BME680 bme = Adafruit_BME680(&Wire);
-SensirionI2CScd4x scd4x;
+SensirionI2cScd4x scd4x;
 SensirionI2CSen5x sen5x;
 SoundSensor mic;
 
@@ -49,12 +50,11 @@ uint32_t uva;
 bool key, doAllSensors, doAllIndices, doFastInterval, doGNSS;
 uint32_t tStart;
 
-// LoRaWAN uplink/downlink parameters
-uint8_t fport = 1;
-
 enum DeviceStates {
-	BOOT,
+  NO_CREDENTIALS,
+	JOIN,
 	START_GNSS,
+  WAIT_SATELLITE,
 	START_PM,
 	START_MIC,
 	START_CO2,
@@ -65,15 +65,16 @@ enum DeviceStates {
 	MEAS_CO2,
 	MEAS_MIC,
 	MEAS_PM,
-	MEAS_GNSS,
-	UPLINK,
+	WAIT_GNSS,
+  READ_DIP,
+  SENDRECEIVE,
 	SHOW_MEAS,
-	DOWNLINK,
 	SLEEP,
-  NO_CREDENTIALS, REJOIN, ACTIVE, SENDRECEIVE, WAKE, MENU, NONE
+  MENU,   // TODO
+  NONE
 };
 
-DeviceStates deviceState = BOOT;
+DeviceStates deviceState = JOIN;
 
 uint32_t tNow = 0;
 
@@ -151,14 +152,14 @@ void writeUplinkToLog() {
   uint32_t dev32 = (cfg.actvn.otaa.devEUI >> 32);
   snprintf(&line[ 9], 9, "%08X", dev32);
   snprintf(&line[17],10, "%08X,", (uint32_t)cfg.actvn.otaa.devEUI);
-  snprintf(&line[26], 3, "%d,", fport);
+  snprintf(&line[26], 3, "%d,", fPort);
   for(int i = 0; i < appDataSize; i++) {
     snprintf(&line[28+i*2], 3, "%02X", appData[i]);
   }
   Serial.printf("%s,\r\n", timeBuf);
   Serial.printf("%08X\r\n", dev32);
   Serial.printf("%08X,\r\n", (uint32_t)cfg.actvn.otaa.devEUI);
-  Serial.printf("%d,\r\n", fport);
+  Serial.printf("%d,\r\n", fPort);
   RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 28);
   RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(appData, appDataSize);
   Serial.printf("[%s] %s\n", dateBuf, line);
@@ -458,7 +459,7 @@ int execCommand(String &command) {
   } else
   if (key == "join") {
     node.clearSession();
-    deviceState = REJOIN;
+    deviceState = JOIN;
   } else
   if (key == "devaddr") {
     Serial.printf("DevAddr: %08X\r\n", node.getDevAddr());
@@ -469,19 +470,19 @@ int execCommand(String &command) {
       String val = "";
       doSetting(key, val);  // set all commands to empty String
     }
-    deviceState = REJOIN;
+    deviceState = JOIN;
   } else
   if (key == "wipelw") {
     store.begin("radiolib");
     store.remove("nonces");
     store.end();
     node.clearSession();
-    deviceState = REJOIN;
+    deviceState = JOIN;
   } else
   if (key == "uplink") {
-    if (deviceState >= ACTIVE)
+    if (deviceState == WAIT_GNSS)
       deviceState = SENDRECEIVE;
-    if(deviceState == REJOIN)
+    if(deviceState == JOIN)
       uplinkASAP();
   } else
   if (key == "sleep") {
@@ -550,54 +551,6 @@ void goLowPower() {
     delay(200);
   }
   turnOff();
-}
-
-void setDeviceState(DeviceStates state = NONE) {
-  // check if tracker is enabled or connected to USB
-  if(!powerState && !usbState) {
-    turnOff();
-  }
-
-  if(state != NONE) {
-    deviceState = state;
-  } else {
-    if(!node.isActivated()) {
-      deviceState = REJOIN;
-    } else
-    if (tNow > nextUplink && numConsecutiveFix >= 5) {
-      deviceState = SENDRECEIVE;
-    } else
-    if (tNow >= nextUplink + cfg.operation.timeout) {
-      deviceState = SENDRECEIVE;
-    } else
-    if(usbState) {
-      deviceState = ACTIVE;
-    } else
-    if(cfg.operation.sleep == false) {
-      deviceState = ACTIVE;
-    } else
-    if(nextUplink < tNow + 30) {
-      deviceState = ACTIVE;
-    } else 
-    {
-      deviceState = WAKE;
-    }
-  }
-
-  setDisplayStyle(displayStyles[styleNum], false);
-
-  if(deviceState == WAKE) {
-    displayStyle->displayWake();
-  } else 
-  if(deviceState == REJOIN && nextUplink <= tNow) {
-    // do nothing - will be redrawn by uplink
-  } else
-  if(deviceState == SENDRECEIVE) {
-    // do nothing - will be redrawn by uplink
-  } else {
-    displayStyle->displayFull();
-  }
-  lastDisplayUpdate = tNow;
 }
 
 static float zweighting[] = Z_WEIGHTING;		// weighting lists
@@ -811,6 +764,7 @@ void setup() {
       lwActivate();
     } else {
       // join in the main loop
+      deviceState = JOIN;
     }
   } else {
     Serial.println("No credentials - going into input mode:");
@@ -818,8 +772,18 @@ void setup() {
     deviceState = NO_CREDENTIALS;
   }
 
-  // update display with LoRaWAN info
-  setDeviceState();
+	Wire.begin(SDA0, SCL0);
+  hspi.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, EPD_CS); // remap hspi for EPD (swap pins)
+
+  display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  display.init(115200, true, 2, false);
+
+	if(isMotion) {
+    doGNSS = true;
+    gps = TinyGPSPlus();
+  } else {
+    doGNSS = false;
+  }
 
   // on fresh boot, configure accelerometer to listen for small bumps
   if(wakeup_reason < ESP_SLEEP_WAKEUP_EXT0) {
@@ -840,41 +804,89 @@ void setup() {
 
   loadMenus();
 
+  // set devicestate if not set by something else
+  if(deviceState == NONE) {
+    deviceState = doGNSS ? START_GNSS :
+            doAllSensors ? START_PM :
+                           START_CO2;	
+  }
 
+}
 
-  // specific for MJLO
+void handleSerialNmea() {
+  int sec = gps.time.second();
 
-	Wire.begin(SDA0, SCL0);
-  hspi.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, EPD_CS); // remap hspi for EPD (swap pins)
+  while (Serial1.available()) {
+    if(printGNSS) {
+      Serial.print((char)Serial1.peek());
+    }
+    gps.encode(Serial1.read());
+  }
 
-  display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  display.init(115200, true, 2, false);
+  double hdop = gps.hdop.hdop();
+  if ((gps.location.age() < 2000) && (hdop <= 3) && (hdop > 0)) {
+    if(gps.time.second() != sec) {
+      numConsecutiveFix = numConsecutiveFix >= 5 ? 5 : numConsecutiveFix + 1;
+    }
+  } else {
+    numConsecutiveFix = 0;
+  }
+  gpsFixLevel =  numConsecutiveFix >= 5 ? GPS_GOOD_FIX : 
+                (hdop > 0 && hdop < 99) ? GPS_BAD_FIX : 
+                                          GPS_NO_FIX;
 
-  
-
-	Serial.println("Reading DIP registers");
-	pinMode(DIP1, INPUT);
-	pinMode(DIP2, INPUT);
-	pinMode(DIP3, INPUT);
-
-	doAllSensors = true;//!digitalRead(DIP1);		  // include PM
-	doAllIndices = false;//!digitalRead(DIP2);		  // include VOC and NOx
-	doFastInterval = true;//!digitalRead(DIP3);	  // uplink interval
-	doGNSS = false;//isMotion ? true : false;
-	isMotion = false;
-
-	deviceState = doGNSS ? START_GNSS :
-					doAllSensors ? START_PM :
-									       START_MIC;	
-
-  tStart = time(NULL);
+  digitalWrite(LED_B, HIGH);
+  delay(50);
+  digitalWrite(LED_B, LOW);
+  // Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
+  //                 gps.time.hour(), gps.time.minute(), gps.time.second());
+  // Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
+  //                 gps.hdop.hdop(), gps.satellites.value());
 }
 
 void loop() {
   delay(10);
-  Serial.println(deviceState);
 
 	switch(deviceState) {
+    case(NO_CREDENTIALS): {
+      // don't do anything, just stay awake
+      break;
+    }
+    case(JOIN): {
+      // wait for next scheduled join-request
+      if (tNow > nextUplink) {
+        // show uplink symbol
+        if(lwBegin()) {
+          displayStyle->displayUplink();
+          prevUplink = tNow;
+          lwRestore(false);
+#if RADIOLIB_LORAWAN_NODE_R          
+          if(cfg.relay.enabled) {
+            node.setRelayActivation(cfg.relay.mode, cfg.relay.backOff, cfg.relay.smartLevel);
+          } else {
+            node.setRelayActivation(0);
+          }
+#endif
+          lwActivate();
+          tNow = time(NULL);  // update tNow as lwActivate() is blocking
+        }
+
+        // calculate when next uplink should be scheduled
+        if(cfg.interval.fixed) {
+          uplinkOffset = cfg.interval.period;
+        } else {
+          uplinkOffset = node.dutyCycleInterval((cfg.interval.dutycycle * 1000) / 24, node.getLastToA()) / 1000 - 5;
+        }
+        uplinkOffset = max(uplinkOffset, (uint32_t)10);
+        scheduleUplink(uplinkOffset, prevUplink);
+
+        // if activated, move on to GNSS
+        if(node.isActivated()) {
+          deviceState = START_GNSS;
+        }
+      }
+
+    }
 		case(START_GNSS): {
       VextOn();
 
@@ -885,21 +897,21 @@ void loop() {
       Serial1.println("$CFGMSG,0,2,0*05");
       Serial1.println("$CFGMSG,0,3,0*04");
 
-      // tft.initR(INITR_MINI160x80_PLUGIN);
-      // tft.setRotation(2);
-      // tft.fillScreen(ST77XX_BLACK);
-      // tft.setCursor(2, 2);
-      // tft.setTextColor(ST77XX_WHITE);
-      // tft.setTextSize(2);
-      // tft.printf("GNSS");
+      deviceState = WAIT_SATELLITE;
+      break;
+    }
+    case(WAIT_SATELLITE): {
+      if(gps.satellites.value()) {
+        deviceState = doAllSensors ? START_PM :
+                                      START_CO2;
+      }
 
-      deviceState = doAllSensors ? START_PM : START_MIC;
       break;
     }
     case(START_PM): {
       pinMode(V5_CTRL, OUTPUT);
       digitalWrite(V5_CTRL, HIGH);
-      delay(500);
+      delay(100);   // theoretical startup time is 50ms
       sen5x.begin(Wire);
       (void)sen5x.deviceReset();
       (void)sen5x.startMeasurement();
@@ -917,21 +929,21 @@ void loop() {
         NULL,  		/* Task handle to keep track of created task */
         0);    		/* pin task to core 0 */
 
+      tStart = time(NULL);
+
       deviceState = START_CO2;
       break;
     }
     case(START_CO2): {
-      scd4x.begin(Wire);
-      scd4x.wakeUp();
-      scd4x.stopPeriodicMeasurement();
-      scd4x.measureSingleShot();
+      scd4x.begin(Wire, 0x62);
+      // scd4x.wakeUp();
+      // scd4x.stopPeriodicMeasurement();
+      (void)scd4x.measureSingleShot();
 
       deviceState = MEAS_BAT;
       break;
     }
     case(MEAS_BAT): {
-      pinMode(BAT_CTRL, INPUT_PULLUP);
-      pinMode(BAT_ADC, INPUT);
       batt_mv = analogReadMilliVolts(BAT_ADC) * 4.9f;
       Serial.printf("Battery: %d mV\r\n", batt_mv);
 
@@ -976,77 +988,84 @@ void loop() {
     }
     case(MEAS_CO2): {
       bool co2_ready;
-      scd4x.getDataReadyFlag(co2_ready);
-      while (!co2_ready) {
-        delay(100);
-        scd4x.getDataReadyFlag(co2_ready);
+      (void)scd4x.getDataReadyStatus(co2_ready);
+
+      if(co2_ready) {
+        float scd_temp, scd_hum;
+        (void)scd4x.readMeasurement(co2, scd_temp, scd_hum);
+        (void)scd4x.powerDown();
+        Serial.printf("CO2: %d\r\n", co2);
+        
+        deviceState = MEAS_MIC;
       }
-      float scd_temp, scd_hum;
-      scd4x.readMeasurement(co2, scd_temp, scd_hum);
-      scd4x.powerDown();
-      Serial.printf("CO2: %d\r\n", co2);
-      
-      deviceState = MEAS_MIC;
+
       break;
     }
     case(MEAS_MIC): {
-      while (millis() < 20000) {
-        delay(100);
+      // wait for a total of 30 seconds of measurement
+      if(millis() - tStart > 30) {
+        mic_stop = true;
+        while (!mic_stopped)
+          delay(10);
+        db_min = zMeasurement.min;
+        db_avg = zMeasurement.avg;
+        db_max = zMeasurement.max;
+        Serial.printf("dB: [%.1f | %.1f | %.1f]\r\n", db_min, db_avg, db_max);
+
+        deviceState = doAllSensors ? MEAS_PM : 
+                doGNSS ? WAIT_GNSS : 
+                SENDRECEIVE;
       }
-      mic_stop = true;
-      while (!mic_stopped)
-        delay(10);
-      db_min = zMeasurement.min;
-      db_avg = zMeasurement.avg;
-      db_max = zMeasurement.max;
-      Serial.printf("dB: [%.1f | %.1f | %.1f]\r\n", db_min, db_avg, db_max);
       
-      deviceState = doAllSensors ? MEAS_PM : 
-              doGNSS ? MEAS_GNSS : 
-                UPLINK;
       break;
     }
     case(MEAS_PM): {
       // wait for a total of 30 seconds of measurement
-      while(time(NULL) - tStart < 40) {
-        delay(100);
+      if(millis() - tStart > 30) {
+        (void)sen5x.readMeasuredValues(pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex);
+        digitalWrite(V5_CTRL, LOW);
+        Serial.printf("PM2.5: %.2f, PM10: %.2f\n", pm2_5, pm10_);
+        
+        deviceState = doGNSS ? WAIT_GNSS : SENDRECEIVE;
       }
-      sen5x.readMeasuredValues(pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex);
-      digitalWrite(V5_CTRL, LOW);
-      Serial.printf("PM2.5: %.2f, PM10: %.2f\n", pm2_5, pm10_);
-      
-      deviceState = doGNSS ? MEAS_GNSS : UPLINK;
-      break;
-    }
-    case(MEAS_GNSS): {
-      Serial.println("Starting active GPS acquisition");
-      uint32_t current = time(NULL);
-      while (time(NULL) - tStart < 1 && (gps.hdop.hdop() > 3 || gps.hdop.hdop() == 0)) {
-        while (Serial1.available()) {
-          gps.encode(Serial1.read());
-        }
-        if(time(NULL) != current) {
-          digitalWrite(LED_B, HIGH);
-          delay(50);
-          digitalWrite(LED_B, LOW);
-          current = time(NULL);
-          Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
-                          gps.time.hour(), gps.time.minute(), gps.time.second());
-          Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
-                          gps.hdop.hdop(), gps.satellites.value());
-        }
-        if(Serial.available()) {
-          Serial.flush();
-          break;
-        }
-      }
-      VextOff();
-      Serial1.end();
 
-      deviceState = SHOW_MEAS;  // TODO
       break;
     }
-    case(UPLINK): {
+    case(WAIT_GNSS): {
+      Serial.println("Waiting for GNSS fix");
+      
+      // if got a fix for five consecutive seconds, send uplink
+      if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
+        deviceState = SENDRECEIVE;
+        Serial1.end();
+      }
+      
+      deviceState = READ_DIP;
+      break;
+    }
+    case(READ_DIP): {
+      Serial.println("Reading DIP registers");
+      
+      pinMode(DIP1, INPUT);
+      pinMode(DIP2, INPUT);
+      pinMode(DIP3, INPUT);
+      
+      doAllSensors = !digitalRead(DIP1);		  // include PM
+      doAllIndices = !digitalRead(DIP2);		  // include VOC and NOx
+      doFastInterval = !digitalRead(DIP3);	  // uplink interval
+      
+      VextOff();
+
+      deviceState = SENDRECEIVE;
+      break;
+    }
+    case(SENDRECEIVE): {
+      displayStyle->displayUplink();
+
+      radio.standby();
+
+      uint32_t airtime = 0;
+
       if(numStationaryUplinks == 0) {
           node.setADR(false);
           node.setDatarate(2);
@@ -1055,29 +1074,48 @@ void loop() {
       }
 
       sendUplink();
+      airtime += node.getLastToA();
+
+      radio.sleep();
       
-      radio.standby();
-      
+      if(isMotion) {
+        numStationaryUplinks = 0;
+      } else {
+        numStationaryUplinks++;
+      }
+      wasMotion = isMotion;
+      isMotion = false;
+
+      tNow = time(NULL);                      // update tNow as sendUplink() is blocking
+
+      // calculate when next uplink should be scheduled
+      if (cfg.interval.fixed) {
+        uplinkOffset = cfg.interval.period;
+      } else {
+        uplinkOffset = node.dutyCycleInterval((cfg.interval.dutycycle * 1000) / 24, airtime) / 1000 - 5;
+      }
+      uplinkOffset = max(uplinkOffset, (uint32_t)30);
+
+      // if there was motion before this uplink, schedule another one soon
+      // otherwise, if there was no motion, multiply with the interval
+      scheduleUplink((cfg.operation.mobile == false || 
+                      numStationaryUplinks < cfg.operation.uplinks) ? uplinkOffset : 
+                                          (cfg.operation.heartbeat > 0) ? cfg.operation.heartbeat :
+                                                                              31536000, prevUplink);
+
       deviceState = SHOW_MEAS;
       break;
     }
     case(SHOW_MEAS): {
       display_eink();
 
-      deviceState = DOWNLINK;
-      break;
-    }
-    case(DOWNLINK): {
-      
-      nextUplink = doFastInterval ? time(NULL) + 300 : time(NULL) + 900;
-      
       deviceState = SLEEP;
       break;
     }
     case(SLEEP): {
       deepsleep();
       
-      deviceState = BOOT;
+      deviceState = JOIN;
       break;	
     }
     default: {
@@ -1085,5 +1123,11 @@ void loop() {
       break;
     }
   }
+
+  if(usbState && Serial.available())
+    handleSerialUSB();
+
+  if(Serial1.available())
+    handleSerialNmea();
 	
 }

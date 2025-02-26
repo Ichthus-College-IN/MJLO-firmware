@@ -4,7 +4,7 @@
 #include <TinyGPSPlus.h>
 
 // GPS class
-TinyGPSPlus gps;
+RTC_DATA_ATTR TinyGPSPlus gps;
 
 enum GpsFixLevel {
     GPS_NO_FIX,
