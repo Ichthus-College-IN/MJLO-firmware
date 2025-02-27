@@ -66,6 +66,10 @@ bool lwBegin() {
       return(false);
     }
   }
+
+  // dutycycle is handled by application
+  node.setDutyCycle(false);
+
   return(true);
 }
 

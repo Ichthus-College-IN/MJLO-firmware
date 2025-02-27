@@ -501,7 +501,7 @@ String printConfig(int group) {
 String printFullConfig(bool inclVersion) {
   String ret = "";
   if (inclVersion) {
-    ret += ("\r\nLoRangeFinder-1\r\nFirmware " MJLO_VERSION "\r\nCompiled " __DATE__ "\r\n");
+    ret += ("\r\nMJLO by Steven @ Ichthus\r\nFirmware " MJLO_VERSION "\r\nCompiled " __DATE__ "\r\n");
   }
   for(int i = 0; i < NUM_GROUPS; i++) {
     ret += printConfig(i);

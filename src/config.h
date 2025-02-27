@@ -93,7 +93,7 @@ struct CfgOperation {
   bool sleep = false;     // off or on
   bool mobile = true;    // stationary or mobile
   uint8_t uplinks = 5;// number of uplinks when no motion in mobile mode
-  uint32_t heartbeat = 3600;
+  uint32_t heartbeat = 600;
   uint16_t timeout = 120;
 };
 
