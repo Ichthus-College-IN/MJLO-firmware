@@ -103,17 +103,17 @@ RTC_DATA_ATTR uint8_t gpsBuf[sizeof(TinyGPSPlus)] = { 0 };
 void onKeyPress();
 void onKeyRelease();
 
-IRAM_ATTR void onKeyPress() {
+void IRAM_ATTR onKeyPress() {
   buttonPressed = true;
-  attachInterrupt(0, onKeyRelease, RISING);       // action button
+  // attachInterrupt(KEY, onKeyRelease, RISING);       // action button
 }
 
-IRAM_ATTR void onKeyRelease() {
+void IRAM_ATTR onKeyRelease() {
   buttonReleased = true;
-  attachInterrupt(0, onKeyPress, FALLING);        // action button
+  // attachInterrupt(KEY, onKeyPress, FALLING);        // action button
 }
 
-IRAM_ATTR void onMotion() {
+void IRAM_ATTR onMotion() {
   detachInterrupt(5);
   if(isMotion) {
     return;
@@ -303,7 +303,7 @@ void printDirectory(File dir, int numTabs) {
   while (true) {
  
     File entry =  dir.openNextFile();
-    if (! entry) {
+    if (!entry) {
       // no more files
       break;
     }
@@ -325,7 +325,7 @@ void printDirectory(File dir, int numTabs) {
 
 void turnOff() {
   memcpy(gpsBuf, &gps, sizeof(TinyGPSPlus));
-  
+
   // handle Timer source if the device is enabled
   if(digitalRead(POWER) == LOW && !powerIsLow) {
     uint64_t timeToSleep = nextUplink - tNow - 30;
@@ -748,14 +748,16 @@ void setup() {
   st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
   st7735.setRotation(2);
 
-  // (try to) restore LoRaWAN session (also puts radio to sleep)
+  // restore LoRaWAN session or join if needed
   if(lwBegin()) {
-    int16_t state = lwRestore();
-    if(state == RADIOLIB_ERR_NONE) {
-      // simply restore
-      lwActivate();
-    } else {
-      // join in the main loop
+    (void)lwRestore();
+    // restore or else try joining at configured datarate
+    lwActivate(cfg.uplink.dr);
+
+    // if join failed, try joining at SF12
+    if(!node.isActivated()) {
+      delay(1000);
+      lwActivate(0);
     }
   } else {
     Serial.println("No credentials - going into input mode:");
@@ -795,8 +797,8 @@ void setup() {
 
   pinMode(KEY, INPUT);
   pinMode(ACC_INT, INPUT);
-  // attachInterrupt(KEY, onKeyPress, FALLING);        // action button
-  // attachInterrupt(ACC_INT, onMotion, RISING);           // accelerometer
+  attachInterrupt(KEY, onKeyPress, FALLING);        // action button
+  attachInterrupt(ACC_INT, onMotion, RISING);       // accelerometer
 
   PRINTF("Starting filesystem...\r\n");
   if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
@@ -874,7 +876,15 @@ void loop() {
         }
 #endif
         prevUplink = tNow;
-        lwActivate();
+        
+        // try joining at configured datarate
+        lwActivate(cfg.uplink.dr);
+
+        // if that failed, try once more at SF12
+        if(!node.isActivated()) {
+          lwActivate(0);
+        }
+
         tNow = time(NULL);  // update tNow as lwActivate() is blocking
 
         // calculate when next uplink should be scheduled
@@ -885,12 +895,6 @@ void loop() {
         }
         uplinkOffset = max(uplinkOffset, (uint32_t)30);
         scheduleUplink(uplinkOffset, prevUplink);
-
-        // wrap back up
-        if(!node.isActivated()) {
-          // TODO decrease datarate until 0
-          return;
-        }
 
         if(doGNSS) {
           deviceState = START_GNSS;
@@ -943,7 +947,7 @@ void loop() {
       xTaskCreatePinnedToCore(
         mic_get_db, 	/* Task function. */
         "Task1",   		/* name of task. */
-        40000,   		/* Stack size of task */
+        8192,   		/* Stack size of task */
         NULL,    		/* parameter of the task */
         1,     		/* priority of the task */
         NULL,  		/* Task handle to keep track of created task */

@@ -96,16 +96,16 @@ int16_t lwRestore(bool restoreSession = true) {
   return(state);
 }
 
-void lwActivate() {
+void lwActivate(uint8_t dr) {
   int16_t state = RADIOLIB_ERR_NETWORK_NOT_JOINED;
   PRINTF("[LoRaWAN] Attempting network join ... ");
 
   radio.standby();
   
   if(cfg.actvn.method == OTAA) {
-    state = node.activateOTAA(cfg.uplink.dr);
+    state = node.activateOTAA(dr);
   } else {
-    state = node.activateABP(cfg.uplink.dr);
+    state = node.activateABP(dr);
   }
 
   radio.sleep();
