@@ -39,9 +39,9 @@ SensirionI2CSen5x sen5x;
 SoundSensor mic;
 
 // e-ink display: GDEY0213B74 122x250, SSD1680 (FPC-A002 20.04.08)
-SPIClass hspi(HSPI);
+// SPIClass hspi(HSPI);
 GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> 
-			display(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
+			epdDisplay(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
 
 float temp, humi, pres, lumi, db_min, db_avg, db_max;
 float pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex;
@@ -156,16 +156,12 @@ void writeUplinkToLog() {
   for(int i = 0; i < appDataSize; i++) {
     snprintf(&line[28+i*2], 3, "%02X", appData[i]);
   }
-  Serial.printf("%s,\r\n", timeBuf);
-  Serial.printf("%08X\r\n", dev32);
-  Serial.printf("%08X,\r\n", (uint32_t)cfg.actvn.otaa.devEUI);
-  Serial.printf("%d,\r\n", fPort);
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 28);
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(appData, appDataSize);
   Serial.printf("[%s] %s\n", dateBuf, line);
   File file = LittleFS.open("/" + String(dateBuf) + ".csv", "a");
   file.println(line);
   file.close();
+  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 28);
+  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(appData, appDataSize);
 }
 
 /* Prepares the payload of the frame */
@@ -289,15 +285,13 @@ void closeSerial() {
 void VextOn(void) {
   pinMode(3, OUTPUT);
   digitalWrite(3, HIGH);  // active HIGH
-  pinMode(21, OUTPUT);
-  digitalWrite(21, HIGH);  // active HIGH
+  // digitalWrite(21, HIGH);  // active HIGH
 }
 
 void VextOff(void) {
   pinMode(3, OUTPUT);
   digitalWrite(3, LOW);
-  pinMode(21, OUTPUT);
-  digitalWrite(21, LOW);
+  // digitalWrite(21, LOW);
 }
 
 void printDirectory(File dir, int numTabs) {
@@ -480,10 +474,15 @@ int execCommand(String &command) {
     deviceState = JOIN;
   } else
   if (key == "uplink") {
-    if (deviceState == WAIT_GNSS)
+    if (deviceState == WAIT_GNSS) {
       deviceState = SENDRECEIVE;
-    if(deviceState == JOIN)
+    }
+    else if (node.isActivated()) {
+      deviceState = START_PM;
+    }
+    else if(deviceState == JOIN) {
       uplinkASAP();
+    }
   } else
   if (key == "sleep") {
     turnOff();
@@ -590,106 +589,90 @@ String to_decimal(float value) {
 }
 
 void display_value(float val, String unit, int16_t x, int16_t y) { 
-	display.setCursor(x, y);
-	display.print(int(val));
-	display.setCursor(x, y+8);
-	display.print(to_decimal(val));
-	display.setCursor(x, y+16);
-	display.print(unit);
+	epdDisplay.setCursor(x, y);
+	epdDisplay.print(int(val));
+	epdDisplay.setCursor(x, y+8);
+	epdDisplay.print(to_decimal(val));
+	epdDisplay.setCursor(x, y+16);
+	epdDisplay.print(unit);
 }
 
 void display_eink() {
   Serial.println("Drawing values");
 	Serial.println(millis());
 
-	display.setRotation(0);
-	display.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
-	display.setFont(0);
+	epdDisplay.setRotation(0);
+	epdDisplay.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
+	epdDisplay.setFont(0);
 
-  display.setPartialWindow(0, 0, 120, 250);
-  // display.setFullWindow();
-  display.firstPage();
+  epdDisplay.setPartialWindow(0, 0, 120, 250);
+  // epdDisplay.setFullWindow();
+  epdDisplay.firstPage();
   do
   {
-    // display.fillScreen(GxEPD_WHITE);
+    epdDisplay.fillScreen(GxEPD_WHITE);
 
-    display.setTextSize(1);
-    display.setCursor(81, 1 + 3);
-    display.printf("Temp");
-    display.setCursor(81, 1 + 13);
-    display.printf("*C");
-    display.setCursor(13, 29 + 3);
-    display.printf("Vocht");
-    display.setCursor(37, 29 + 13);
-    display.printf("%%");
-    display.setCursor(81, 57 + 3);
-    display.printf("Druk");
-    display.setCursor(81, 57 + 13);
-    display.printf("hPa");
-    display.setCursor(25, 85 + 3);
-    display.printf("CO2");
-    display.setCursor(25, 85 + 13);
-    display.printf("ppm");
+    epdDisplay.setTextSize(1);
+    epdDisplay.setCursor(81, 1 + 3);
+    epdDisplay.printf("Temp");
+    epdDisplay.setCursor(81, 1 + 13);
+    epdDisplay.printf("*C");
+    epdDisplay.setCursor(13, 29 + 3);
+    epdDisplay.printf("Vocht");
+    epdDisplay.setCursor(37, 29 + 13);
+    epdDisplay.printf("%%");
+    epdDisplay.setCursor(81, 57 + 3);
+    epdDisplay.printf("Druk");
+    epdDisplay.setCursor(81, 57 + 13);
+    epdDisplay.printf("hPa");
+    epdDisplay.setCursor(25, 85 + 3);
+    epdDisplay.printf("CO2");
+    epdDisplay.setCursor(25, 85 + 13);
+    epdDisplay.printf("ppm");
 
-    display.setTextSize(3);
-    display.setCursor(1, 1);
-    display.printf("%4.1f", temp);
-    display.setCursor(49, 29);
-    display.printf("%4.1f", humi);
-    display.setCursor(1, 57);
-    display.printf("%4.0f", pres);
-    display.setCursor(49, 85);
-    display.printf("%4d", co2);
+    epdDisplay.setTextSize(3);
+    epdDisplay.setCursor(1, 1);
+    epdDisplay.printf("%4.1f", temp);
+    epdDisplay.setCursor(49, 29);
+    epdDisplay.printf("%4.1f", humi);
+    epdDisplay.setCursor(1, 57);
+    epdDisplay.printf("%4.0f", pres);
+    epdDisplay.setCursor(49, 85);
+    epdDisplay.printf("%4d", co2);
 
-    display.setCursor(1, 113);
-    display.printf("%4.1f", db_avg);
+    epdDisplay.setCursor(1, 113);
+    epdDisplay.printf("%4.1f", db_avg);
 
     if(doAllSensors) {
-      display.setCursor(49, 141);
-      display.printf("%4.1f", pm2_5);
+      epdDisplay.setCursor(49, 141);
+      epdDisplay.printf("%4.1f", pm2_5);
     }
 
     int width = map((int)batt_mv, 2850, 4050, 0, 104);
     width = max(0, min(104, width));
-    display.drawRoundRect(7, 240, 106, 11, 2, GxEPD_BLACK);
-    display.fillRect(8, 241, width, 9, GxEPD_BLACK);
-    display.fillRect(8 + 104 - width, 241, 104 - width, 9, GxEPD_WHITE);
+    epdDisplay.drawRoundRect(7, 240, 106, 11, 2, GxEPD_BLACK);
+    epdDisplay.fillRect(8, 241, width, 9, GxEPD_BLACK);
+    epdDisplay.fillRect(8 + 104 - width, 241, 104 - width, 9, GxEPD_WHITE);
   }
-  while (display.nextPage());
+  while (epdDisplay.nextPage());
 
-	display.hibernate();
+	epdDisplay.hibernate();
 	Serial.println(millis());
   Serial.flush();
   delay(50);
-}
-
-void deepsleep() {
-  Serial.println("Zzzzz...");
-  Serial.flush();
-  radio.sleep();
-  delay(100);
-  nextUplink = time(NULL) + 600;  // TODO
-	uint32_t interval = (nextUplink - time(NULL)) * 1000 * 1000;
-
-	esp_sleep_enable_timer_wakeup(interval);
-	esp_sleep_enable_ext0_wakeup((gpio_num_t)KEY, LOW);
-
-  // TODO
-	// // only listen to accelerometer if there's no motion detected yet
-	// if(!isMotion) {
-	// 	esp_sleep_enable_ext1_wakeup(1ULL << ACC_INT, ESP_EXT1_WAKEUP_ANY_HIGH);
-	// }
-	esp_deep_sleep_start();
 }
 
 void setup() {
   pinMode(BAT_ADC, INPUT);
   pinMode(BAT_CTRL, INPUT_PULLUP);
   pinMode(POWER, INPUT_PULLDOWN);
+  pinMode(LED_B, OUTPUT);
+  pinMode(TFT_BL, OUTPUT);  // EPD_BUSY
+  pinMode(EPD_CS, OUTPUT);
 
   battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
   powerState = (digitalRead(POWER) == LOW);
-  usbState = usb_serial_jtag_is_connected();
+  usbState = true;//usb_serial_jtag_is_connected();
 
   tNow = time(NULL);
 
@@ -752,7 +735,7 @@ void setup() {
 
   VextOn();
 
-  spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, TFT_CS);            // SCK/CLK, MISO, MOSI, NSS/CS
+  spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI);            // SCK/CLK, MISO, MOSI, NSS/CS
   st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
   st7735.setRotation(2);
 
@@ -773,10 +756,10 @@ void setup() {
   }
 
 	Wire.begin(SDA0, SCL0);
-  hspi.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, EPD_CS); // remap hspi for EPD (swap pins)
+  // hspi.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, EPD_CS); // remap hspi for EPD (swap pins)
 
-  display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  display.init(115200, true, 2, false);
+  epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  epdDisplay.init(115200, true, 2, false);
 
 	if(isMotion) {
     doGNSS = true;
@@ -796,11 +779,13 @@ void setup() {
 
   pinMode(KEY, INPUT);
   pinMode(ACC_INT, INPUT);
-  attachInterrupt(KEY, onKeyPress, FALLING);        // action button
-  attachInterrupt(ACC_INT, onMotion, RISING);           // accelerometer
+  // attachInterrupt(KEY, onKeyPress, FALLING);        // action button
+  // attachInterrupt(ACC_INT, onMotion, RISING);           // accelerometer
 
   PRINTF("Starting filesystem...\r\n");
   if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
+
+  setDisplayStyle(displayStyles[0], true);
 
   loadMenus();
 
@@ -810,6 +795,7 @@ void setup() {
             doAllSensors ? START_PM :
                            START_CO2;	
   }
+  deviceState = NO_CREDENTIALS;
 
 }
 
@@ -838,14 +824,12 @@ void handleSerialNmea() {
   digitalWrite(LED_B, HIGH);
   delay(50);
   digitalWrite(LED_B, LOW);
-  // Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
-  //                 gps.time.hour(), gps.time.minute(), gps.time.second());
-  // Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
-  //                 gps.hdop.hdop(), gps.satellites.value());
 }
 
 void loop() {
+  // Serial.println(deviceState);
   delay(10);
+  tNow = time(NULL);
 
 	switch(deviceState) {
     case(NO_CREDENTIALS): {
@@ -857,6 +841,7 @@ void loop() {
       if (tNow > nextUplink) {
         // show uplink symbol
         if(lwBegin()) {
+          Serial.println("Activating...");
           displayStyle->displayUplink();
           prevUplink = tNow;
           lwRestore(false);
@@ -869,6 +854,8 @@ void loop() {
 #endif
           lwActivate();
           tNow = time(NULL);  // update tNow as lwActivate() is blocking
+        } else {
+          Serial.println("Unable to activate");
         }
 
         // calculate when next uplink should be scheduled
@@ -882,10 +869,10 @@ void loop() {
 
         // if activated, move on to GNSS
         if(node.isActivated()) {
-          deviceState = START_GNSS;
+          deviceState = START_PM; // TODO
         }
       }
-
+      break;
     }
 		case(START_GNSS): {
       VextOn();
@@ -902,8 +889,14 @@ void loop() {
     }
     case(WAIT_SATELLITE): {
       if(gps.satellites.value()) {
-        deviceState = doAllSensors ? START_PM :
-                                      START_CO2;
+        // deviceState = doAllSensors ? START_PM :
+        //                               START_CO2;
+        deviceState = START_PM;
+
+        Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
+                        gps.time.hour(), gps.time.minute(), gps.time.second());
+        Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
+                        gps.hdop.hdop(), gps.satellites.value());
       }
 
       break;
@@ -936,9 +929,11 @@ void loop() {
     }
     case(START_CO2): {
       scd4x.begin(Wire, 0x62);
-      // scd4x.wakeUp();
-      // scd4x.stopPeriodicMeasurement();
-      (void)scd4x.measureSingleShot();
+      int err = scd4x.wakeUp();
+      Serial.printf("Err: %d\n", err);
+      // (void)scd4x.stopPeriodicMeasurement();
+      err = scd4x.measureSingleShot();
+      Serial.printf("Err: %d\n", err);
 
       deviceState = MEAS_BAT;
       break;
@@ -982,7 +977,7 @@ void loop() {
       uva = veml.readUV();
       veml.sleep(true);
       Serial.println(uva);
-       
+      
       deviceState = MEAS_CO2;
       break;
     }
@@ -993,7 +988,7 @@ void loop() {
       if(co2_ready) {
         float scd_temp, scd_hum;
         (void)scd4x.readMeasurement(co2, scd_temp, scd_hum);
-        (void)scd4x.powerDown();
+        // (void)scd4x.powerDown();
         Serial.printf("CO2: %d\r\n", co2);
         
         deviceState = MEAS_MIC;
@@ -1003,8 +998,9 @@ void loop() {
     }
     case(MEAS_MIC): {
       // wait for a total of 30 seconds of measurement
-      if(millis() - tStart > 30) {
+      if(tNow - tStart > 30) {
         mic_stop = true;
+        Serial.println("Stopping microphone");
         while (!mic_stopped)
           delay(10);
         db_min = zMeasurement.min;
@@ -1021,12 +1017,13 @@ void loop() {
     }
     case(MEAS_PM): {
       // wait for a total of 30 seconds of measurement
-      if(millis() - tStart > 30) {
+      if(tNow - tStart > 30) {
         (void)sen5x.readMeasuredValues(pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex);
         digitalWrite(V5_CTRL, LOW);
         Serial.printf("PM2.5: %.2f, PM10: %.2f\n", pm2_5, pm10_);
         
-        deviceState = doGNSS ? WAIT_GNSS : SENDRECEIVE;
+        // deviceState = doGNSS ? WAIT_GNSS : SENDRECEIVE; // TODO
+        deviceState = SENDRECEIVE;
       }
 
       break;
@@ -1038,6 +1035,10 @@ void loop() {
       if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
         deviceState = SENDRECEIVE;
         Serial1.end();
+        Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
+                        gps.time.hour(), gps.time.minute(), gps.time.second());
+        Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
+                        gps.hdop.hdop(), gps.satellites.value());
       }
       
       deviceState = READ_DIP;
@@ -1113,7 +1114,7 @@ void loop() {
       break;
     }
     case(SLEEP): {
-      deepsleep();
+      turnOff();
       
       deviceState = JOIN;
       break;	

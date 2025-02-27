@@ -28,7 +28,7 @@
 uint32_t displayTimout = 2500;
 
 SPIClass spiST(HSPI);
-Adafruit_ST7735 st7735 = Adafruit_ST7735(&spiST, 38, 40, 39);
+Adafruit_ST7735 st7735 = Adafruit_ST7735(&spiST, TFT_CS, TFTEPD_DC, TFTEPD_RST);
 uint32_t lastDisplayUpdate = 0;
 
 double oldLat = -1, oldLng = -1, oldAlt = -1, oldHdop = -1;
