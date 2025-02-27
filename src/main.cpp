@@ -208,7 +208,7 @@ uint8_t prepareTxFrame() {
     
     // insert VOC and NOx
   }
-  if(doGNSS) {    // includes GNSS
+  if(true) {          // includes GNSS (NOTE: decide in future)
     port |= BIT(3);
     
     uint32_t rawLat = abs(gps.location.lat()) * 10000000;
@@ -934,7 +934,7 @@ void loop() {
     case(START_MIC): {
       mic_stop = false;
       mic_stopped = false;
-      
+
       xTaskCreatePinnedToCore(
         mic_get_db, 	/* Task function. */
         "Task1",   		/* name of task. */
@@ -1054,8 +1054,6 @@ void loop() {
       break;
     }
     case(WAIT_GNSS): {
-      Serial.println("Waiting for GNSS fix");
-      
       // if got a fix for five consecutive seconds, send uplink
       if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
         deviceState = SENDRECEIVE;
@@ -1076,25 +1074,36 @@ void loop() {
 
       radio.standby();
 
-      uint32_t airtime = 0;
+      // if device stopped moving, do a quick confirmed uplink series to settle datarate
+      if(wasMotion && !isMotion) {
+        for(uint8_t drNew = 5; drNew >= 0; drNew--) {
+          node.setDatarate(drNew);
+          const uint8_t data[1] = { drNew };
+          uint8_t rxWindow = node.sendReceive(data, 1, 128, true);
+          if(rxWindow > 0) {
+            break;
+          }
+          if(drNew == 0) {
+            break;
+          }
+          delay(1000);
+        }
+      }
 
-      if(numStationaryUplinks == 0) {
-          node.setADR(false);
-          node.setDatarate(2);
+      if(isMotion) {
+        numStationaryUplinks = 0;
+        node.setADR(false);
+        node.setDatarate(2);
       } else {
-          node.setADR(true);
+        numStationaryUplinks++;
+        node.setADR(true);
       }
 
       sendUplink();
-      airtime += node.getLastToA();
+      uint32_t airtime = node.getLastToA();
 
       radio.sleep();
       
-      if(isMotion) {
-        numStationaryUplinks = 0;
-      } else {
-        numStationaryUplinks++;
-      }
       wasMotion = isMotion;
       isMotion = false;
 
@@ -1112,14 +1121,16 @@ void loop() {
       // wrap back up to the begin, and read the DIP switches for the next measurement
       if(wasMotion) {
         scheduleUplink(30, prevUplink);
-        deviceState = WAIT_SATELLITE;
-
+        
         Serial.println("Reading DIP registers");
         doAllSensors = !digitalRead(DIP1);		  // include PM
         doAllIndices = !digitalRead(DIP2);		  // include VOC and NOx
         doFastInterval = !digitalRead(DIP3);	  // uplink interval
+        
+        deviceState = WAIT_SATELLITE;
       } else {
         scheduleUplink(cfg.operation.heartbeat, prevUplink);
+        
         deviceState = SHOW_MEAS;
       }
 
