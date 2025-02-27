@@ -98,6 +98,8 @@ long lastPress = 0;
 bool wasMotion = false;
 bool printGNSS = false;
 
+RTC_DATA_ATTR uint8_t gpsBuf[sizeof(TinyGPSPlus)] = { 0 };
+
 void onKeyPress();
 void onKeyRelease();
 
@@ -322,6 +324,8 @@ void printDirectory(File dir, int numTabs) {
 }
 
 void turnOff() {
+  memcpy(gpsBuf, &gps, sizeof(TinyGPSPlus));
+  
   // handle Timer source if the device is enabled
   if(digitalRead(POWER) == LOW && !powerIsLow) {
     uint64_t timeToSleep = nextUplink - tNow - 30;
@@ -786,6 +790,7 @@ void setup() {
     VextOn();
   } else {
     doGNSS = false;
+    memcpy(&gps, gpsBuf, sizeof(TinyGPSPlus));
   }
 
   pinMode(KEY, INPUT);
