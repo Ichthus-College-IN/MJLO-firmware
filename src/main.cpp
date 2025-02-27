@@ -779,7 +779,6 @@ void setup() {
     // act as if there was motion to do full GNSS cycle etc.
     isMotion = true;
   }
-  isMotion = false; // TODO
 
   if(isMotion) {
     doGNSS = true;
@@ -933,6 +932,9 @@ void loop() {
       break; 
     }
     case(START_MIC): {
+      mic_stop = false;
+      mic_stopped = false;
+      
       xTaskCreatePinnedToCore(
         mic_get_db, 	/* Task function. */
         "Task1",   		/* name of task. */
