@@ -45,7 +45,7 @@ GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT>
 
 float temp, humi, pres, lumi, db_min, db_avg, db_max;
 float pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex;
-uint16_t batt_mv, co2;
+uint16_t co2;
 uint32_t uva;
 bool key, doGNSS;
 RTC_DATA_ATTR bool doAllSensors, doAllIndices, doFastInterval;
@@ -170,7 +170,7 @@ void writeUplinkToLog() {
 uint8_t prepareTxFrame() {
   uint8_t port = 1;
 
-  appData[0] = max(0, min(255, int((batt_mv - 2500) / 10))); // battery
+  appData[0] = max(0, min(255, int((battMillivolts - 2500) / 10))); // battery
   uint16_t cTemp = (uint16_t)max(0, min(32767, int(abs(temp) * 100)));
   if (temp < 0)
     cTemp |= (uint16_t(1) << 15);
@@ -654,7 +654,7 @@ void display_eink() {
       epdDisplay.printf("%4.1f", pm2_5);
     }
 
-    int width = map((int)batt_mv, 2850, 4050, 0, 104);
+    int width = map((int)battMillivolts, 2850, 4050, 0, 104);
     width = max(0, min(104, width));
     epdDisplay.drawRoundRect(7, 240, 106, 11, 2, GxEPD_BLACK);
     epdDisplay.fillRect(8, 241, width, 9, GxEPD_BLACK);
@@ -972,8 +972,8 @@ void loop() {
       break;
     }
     case(MEAS_BAT): {
-      batt_mv = analogReadMilliVolts(BAT_ADC) * 4.9f;
-      Serial.printf("Battery: %d mV\r\n", batt_mv);
+      battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
+      Serial.printf("Battery: %d mV\r\n", battMillivolts);
 
       deviceState = MEAS_TPH;
       break;
