@@ -39,7 +39,6 @@ SensirionI2CSen5x sen5x;
 SoundSensor mic;
 
 // e-ink display: GDEY0213B74 122x250, SSD1680 (FPC-A002 20.04.08)
-// SPIClass hspi(HSPI);
 GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> 
 			epdDisplay(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
 
@@ -48,8 +47,16 @@ float pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex;
 uint16_t co2;
 uint32_t uva;
 bool key, doGNSS;
-RTC_DATA_ATTR bool doAllSensors, doAllIndices, doFastInterval;
 uint32_t tStart;
+
+enum dipIntervals {
+  FAST = 1,
+  MEDIUM = 30,
+  SLOW = 600,
+};
+
+RTC_DATA_ATTR bool dipMode, dipGnss, dipWifi;
+RTC_DATA_ATTR dipIntervals dipInterval;
 
 enum DeviceStates {
   IDLE,
@@ -168,49 +175,61 @@ void writeUplinkToLog() {
 
 /* Prepares the payload of the frame */
 uint8_t prepareTxFrame() {
-  uint8_t port = 1;
+  uint8_t port = 1;             // default port 1
+  if(isMotion) port |= BIT(1);  // set second bit in case of motion
 
-  appData[0] = max(0, min(255, int((battMillivolts - 2500) / 10))); // battery
+  // battery
+  appData[0] = max(0, min(255, int((battMillivolts - 2500) / 10)));
+
+  // temperature
   uint16_t cTemp = (uint16_t)max(0, min(32767, int(abs(temp) * 100)));
   if (temp < 0)
     cTemp |= (uint16_t(1) << 15);
-  memcpy(&appData[1], &cTemp, 2);           	// temperature
+  memcpy(&appData[1], &cTemp, 2);
 
-  appData[3] = max(0, min(255, int(humi * 2)));    		// humidity
+  // humidity
+  appData[3] = max(0, min(255, int(humi * 2)));
 
+  // pressure
   uint16_t pPres = max(0, min(65535, int(pres * 10)));
-  memcpy(&appData[4], &pPres, 2);           	// pressure
+  memcpy(&appData[4], &pPres, 2);
 
+  // luminosity
   uint16_t lLumi = max(0, min(65535, int(lumi)));
-  memcpy(&appData[6], &lLumi, 2);           	// luminosity
+  memcpy(&appData[6], &lLumi, 2);
 
-  appData[8] = max(0, min(255, int(uva)));       	// UV
+  // uv
+  appData[8] = max(0, min(255, int(uva)));
 
-  appData[9] = max(0, min(255, int((db_min - 32) * 4))); 	// dbMin
-  appData[10] = max(0, min(255, int((db_avg - 32) * 4)));	// dbAvg
-  appData[11] = max(0, min(255, int((db_max - 32) * 4)));	// dbMax
+  // db: min, avg, max
+  appData[9] = max(0, min(255, int((db_min - 32) * 4)));
+  appData[10] = max(0, min(255, int((db_avg - 32) * 4)));
+  appData[11] = max(0, min(255, int((db_max - 32) * 4)));
 
+  // co2
   uint16_t mCO2 = (uint16_t)max(0, min(65535, (int)co2));
-  memcpy(&appData[12], &mCO2, 2);           	// co2
+  memcpy(&appData[12], &mCO2, 2);
 
-  appDataSize = 14;
+  // pm2.5, pm10
+  uint16_t mPM25 = max(0, min(1023, int(pm2_5 * 10)));
+  uint16_t mPM10 = max(0, min(1023, int(pm10_ * 10)));
+  appData[14] = (uint8_t)mPM25;             // pm2.5 LSB
+  appData[15] = (uint8_t)mPM10;             // pm10  LSB
+  appData[16] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
 
-  if(doAllSensors) {  // includes PM
-    port |= BIT(1);
+  appDataSize = 17;
 
-    uint16_t mPM25 = max(0, min(1023, int(pm2_5 * 10)));
-    uint16_t mPM10 = max(0, min(1023, int(pm10_ * 10)));
-    appData[appDataSize+0] = (uint8_t)mPM25;             // pm2.5 LSB
-    appData[appDataSize+1] = (uint8_t)mPM10;             // pm10  LSB
-    appData[appDataSize+2] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
-		appDataSize += 3;
-  }
-  if(doAllIndices) {  // includes VOC and NOx
+  if(dipInterval == FAST) {  // includes VOC and NOx
     port |= BIT(2);
     
-    // insert VOC and NOx
+    uint16_t rawVoc = vocIndex*10;
+    uint16_t rawNox = noxIndex*10;
+    memcpy(&appData[appDataSize+0], &rawVoc, 2);
+    memcpy(&appData[appDataSize+2], &rawNox, 2);
+    
+    appDataSize += 4;
   }
-  if(true) {          // includes GNSS (NOTE: decide in future)
+  if(dipGnss) {
     port |= BIT(3);
     
     uint32_t rawLat = abs(gps.location.lat()) * 10000000;
@@ -219,14 +238,19 @@ uint8_t prepareTxFrame() {
     uint32_t rawLng = abs(gps.location.lng()) * 10000000;
     if (gps.location.lng() < 0)
       rawLng |= (1ul << 31);
-    uint8_t rawHdop = gps.hdop.hdop() * 5;
-    uint8_t rawSats = min((int)gps.satellites.value(), 15);
-    uint8_t hdopSats = (rawHdop << 4) | rawSats;
+    uint16_t rawAlt = abs(gps.altitude.meters()) * 10;
+    if (gps.altitude.meters() < 0)
+      rawAlt |= (1ul << 15);
+    uint8_t rawHdop = (int)(gps.hdop.hdop() * 10);
+    uint8_t rawSats = gps.satellites.value();
+
     memcpy(&appData[appDataSize+0], &rawLat, 4);
     memcpy(&appData[appDataSize+4], &rawLng, 4);
-    memcpy(&appData[appDataSize+8], &hdopSats, 1);
+    memcpy(&appData[appDataSize+8], &rawAlt, 2);
+    memcpy(&appData[appDataSize+10], &rawHdop, 1);
+    memcpy(&appData[appDataSize+11], &rawSats, 1);
 
-    appDataSize += 9;
+    appDataSize += 12;
   }
 
 	return port;
@@ -284,14 +308,14 @@ void closeSerial() {
 }
 
 
-void VextOn(void) {
+void VextOn() {
   pinMode(V_EXT, OUTPUT);
   digitalWrite(V_EXT, HIGH);  // active HIGH
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);  // active HIGH
 }
 
-void VextOff(void) {
+void VextOff() {
   pinMode(V_EXT, OUTPUT);
   digitalWrite(V_EXT, LOW);
   pinMode(TFT_BL, OUTPUT);
@@ -299,42 +323,56 @@ void VextOff(void) {
   pinMode(EPD_BUSY, INPUT);
 }
 
-void printDirectory(File dir, int numTabs) {
-  while (true) {
- 
-    File entry =  dir.openNextFile();
-    if (!entry) {
-      // no more files
+void readDip() {
+  uint8_t dip1 = LOW;//!digitalRead(DIP1);
+  uint8_t dip2 = !digitalRead(DIP2);
+  uint8_t dip3 = !digitalRead(DIP3);
+  uint8_t dip = (dip1 << 2) | (dip2 << 1) | (dip3 << 0);
+  switch(dip) {
+    case 0b000:
+      dipInterval = SLOW, dipMode = OTAA, dipGnss = true, dipWifi = false;
       break;
-    }
-    for (uint8_t i = 0; i < numTabs; i++) {
-      Serial.print('\t');
-    }
-    Serial.print(entry.name());
-    if (entry.isDirectory()) {
-      Serial.println("/");
-      printDirectory(entry, numTabs + 1);
-    } else {
-      // files have sizes, directories do not
-      Serial.print("\t\t");
-      Serial.println(entry.size(), DEC);
-    }
-    entry.close();
+    case 0b100:
+      dipInterval = MEDIUM, dipMode = OTAA, dipGnss = true, dipWifi = false;
+      break;
+    case 0b010:
+      dipInterval = SLOW, dipMode = ABP, dipGnss = true, dipWifi = false;
+      break;
+    case 0b110:
+      dipInterval = MEDIUM, dipMode = ABP, dipGnss = true, dipWifi = false;
+      break;
+    case 0b001:
+      dipInterval = SLOW, dipMode = OTAA, dipGnss = false, dipWifi = false;
+      break;
+    case 0b101:
+      dipInterval = MEDIUM, dipMode = OTAA, dipGnss = false, dipWifi = false;
+      break;
+    case 0b011:
+      dipInterval = MEDIUM, dipMode = OTAA, dipGnss = false, dipWifi = true;
+      break;
+    case 0b111:
+      dipInterval = FAST, dipMode = OTAA, dipGnss = false, dipWifi = true;
+      break;
+    default:
+      dipInterval = SLOW, dipMode = OTAA, dipGnss = true, dipWifi = false;
+      break;
   }
+  Serial.printf("DIP: %d%d%d, Int: %d, Mode: %d, Gnss: %d, WiFi: %d\r\n", 
+                dip1, dip2, dip3, dipInterval, dipMode, dipGnss, dipWifi);
 }
 
 void turnOff() {
   memcpy(gpsBuf, &gps, sizeof(TinyGPSPlus));
 
   // handle Timer source if the device is enabled
-  if(digitalRead(POWER) == LOW && !powerIsLow) {
+  if(digitalRead(POWER) == HIGH && !powerIsLow) {
     uint64_t timeToSleep = nextUplink - tNow - 30;
     esp_sleep_enable_timer_wakeup(timeToSleep * 1000000ULL);
   }
 
   // handle EXT0 source (power button or action button)
   bool wakeLevel0;
-  if(digitalRead(POWER) == HIGH) {      // turned off?
+  if(digitalRead(POWER) == LOW) {      // turned off?
     wakePin0 = (gpio_num_t)POWER;       // listen to power-button
     wakeLevel0 = LOW;
 
@@ -348,7 +386,7 @@ void turnOff() {
   // handle EXT1 sources (power button and accelerometer)
   uint64_t wakePins1 = 0x00000000;  // no pin interrupts
   esp_sleep_ext1_wakeup_mode_t wakeLevel1;
-  if(digitalRead(POWER) == LOW) {       // turned on?
+  if(digitalRead(POWER) == HIGH) {       // turned on?
     wakePins1 |= (1 << POWER);          // listen to power-off
     if(cfg.operation.mobile && !isMotion && !powerIsLow) {
       wakePins1 |= (1 << ACC_INT);        // listen to accelGyro
@@ -431,26 +469,6 @@ int execCommand(String &command) {
     }
     Serial.println("");
     setCpuFrequencyMhz(40);
-  } else
-  if (key == "dir") {
-    File dir = LittleFS.open("/");
-    printDirectory(dir, 0);
-    Serial.printf("FS total: %d, used: %d\r\n", LittleFS.totalBytes(), LittleFS.usedBytes());
-  } else
-  if (key == "fill") {
-    int x = 0;
-    while(LittleFS.usedBytes() < (LittleFS.totalBytes() * 0.8)) {
-      char fileBuf[16];
-      sprintf(fileBuf, "/00filler%d.csv", x);
-      Serial.printf("Opening file %s (%d) for appending\r\n", fileBuf, strlen(fileBuf));
-      File f = LittleFS.open(fileBuf, "a");
-      for(int i = 0; i < 200; i++) {
-        f.println("time,latitude,longitude,altitude,hdop,sats,freq,fcnt_up,fport,sf,txpower,fcnt_down,rssi,snr");
-      }
-      f.close();
-      Serial.println(x);
-      x++;
-    }
   } else
   if (key == "load") {
     loadConfig();
@@ -649,10 +667,8 @@ void display_eink() {
     epdDisplay.setCursor(1, 113);
     epdDisplay.printf("%4.1f", db_avg);
 
-    if(doAllSensors) {
-      epdDisplay.setCursor(49, 141);
-      epdDisplay.printf("%4.1f", pm2_5);
-    }
+    epdDisplay.setCursor(49, 141);
+    epdDisplay.printf("%4.1f", pm2_5);
 
     int width = map((int)battMillivolts, 2850, 4050, 0, 104);
     width = max(0, min(104, width));
@@ -680,8 +696,8 @@ void setup() {
   pinMode(DIP3, INPUT);
 
   battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
-  powerState = (digitalRead(POWER) == LOW);
-  usbState = true;//usb_serial_jtag_is_connected();
+  powerState = (digitalRead(POWER) == HIGH);
+  usbState = usb_serial_jtag_is_connected();
 
   tNow = time(NULL);
 
@@ -764,7 +780,6 @@ void setup() {
   }
 
 	Wire.begin(SDA0, SCL0);
-  // hspi.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, EPD_CS); // remap hspi for EPD (swap pins)
 
   epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
   epdDisplay.init(115200, true, 2, false);
@@ -778,15 +793,15 @@ void setup() {
     // read the DIP configuration - this requires Vext enabled
     VextOn();
     delay(100);
-    doAllSensors = !digitalRead(DIP1);		  // include PM
-    doAllIndices = !digitalRead(DIP2);		  // include VOC and NOx
-    doFastInterval = !digitalRead(DIP3);	  // uplink interval
+
+    // update DIP read
+    readDip();
 
     // act as if there was motion to do full GNSS cycle etc.
     isMotion = true;
   }
 
-  if(isMotion) {
+  if(dipGnss && isMotion) {
     doGNSS = true;
     gps = TinyGPSPlus();
     VextOn();
@@ -896,10 +911,14 @@ void loop() {
         uplinkOffset = max(uplinkOffset, (uint32_t)30);
         scheduleUplink(uplinkOffset, prevUplink);
 
-        if(doGNSS) {
-          deviceState = START_GNSS;
+        if(node.isActivated()) {
+          if(doGNSS) {
+            deviceState = START_GNSS;
+          } else {
+            deviceState = START_PM;
+          }
         } else {
-          deviceState = START_PM;
+          deviceState = SLEEP;
         }
       }
       break;
@@ -925,6 +944,10 @@ void loop() {
                         gps.hdop.hdop(), gps.satellites.value());
 
         deviceState = START_PM;
+      }
+
+      if(!powerState && !usbState) {
+        turnOff();
       }
 
       break;
@@ -967,13 +990,6 @@ void loop() {
       SensirionI2CTxFrame txFrame =
           SensirionI2CTxFrame::createWithUInt16Command(0x219d, buffer_ptr, 2);
       (void)SensirionI2CCommunication::sendFrame(0x62, txFrame, Wire);
-
-      deviceState = MEAS_BAT;
-      break;
-    }
-    case(MEAS_BAT): {
-      battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
-      Serial.printf("Battery: %d mV\r\n", battMillivolts);
 
       deviceState = MEAS_TPH;
       break;
@@ -1024,14 +1040,21 @@ void loop() {
         // (void)scd4x.powerDown();
         Serial.printf("CO2: %d\r\n", co2);
         
-        deviceState = MEAS_MIC;
+        deviceState = MEAS_BAT;
       }
 
       break;
     }
+    case(MEAS_BAT): {
+      battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
+      Serial.printf("Battery: %d mV\r\n", battMillivolts);
+
+      deviceState = MEAS_MIC;
+      break;
+    }
     case(MEAS_MIC): {
       // wait for a total of 30 seconds of measurement
-      if(tNow - tStart > 30) {
+      if(tNow - tStart > MEDIUM) {
         mic_stop = true;
         Serial.println("Stopping microphone");
         while (!mic_stopped)
@@ -1048,7 +1071,7 @@ void loop() {
     }
     case(MEAS_PM): {
       // wait for a total of 30 seconds of measurement
-      if(tNow - tStart > 30) {
+      if(tNow - tStart > MEDIUM) {
         (void)sen5x.readMeasuredValues(pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex);
         digitalWrite(V5_CTRL, LOW);
         Serial.printf("PM2.5: %.2f, PM10: %.2f\n", pm2_5, pm10_);
@@ -1073,6 +1096,9 @@ void loop() {
                         gps.hdop.hdop(), gps.satellites.value());
                         
         deviceState = SENDRECEIVE;
+      }
+      if(!powerState && !usbState) {
+        turnOff();
       }
       // TODO wrap back around to measuring while no GNSS fix
       
@@ -1119,26 +1145,20 @@ void loop() {
       tNow = time(NULL);                      // update tNow as sendUplink() is blocking
 
       // calculate when next uplink should be scheduled
-      if (cfg.interval.fixed) {
-        uplinkOffset = cfg.interval.period;
-      } else {
-        uplinkOffset = node.dutyCycleInterval((cfg.interval.dutycycle * 1000) / 24, airtime) / 1000 - 5;
-      }
-      uplinkOffset = max(uplinkOffset, (uint32_t)30);
+      uplinkOffset = dipInterval;
 
       // if there was motion before this uplink, schedule another one soon
       // wrap back up to the begin, and read the DIP switches for the next measurement
       if(wasMotion) {
-        scheduleUplink(30, prevUplink);
+        uplinkOffset = min(uplinkOffset, (uint32_t)MEDIUM);
+        scheduleUplink(uplinkOffset, prevUplink);
         
         Serial.println("Reading DIP registers");
-        doAllSensors = !digitalRead(DIP1);		  // include PM
-        doAllIndices = !digitalRead(DIP2);		  // include VOC and NOx
-        doFastInterval = !digitalRead(DIP3);	  // uplink interval
+        readDip();
         
         deviceState = WAIT_SATELLITE;
       } else {
-        scheduleUplink(cfg.operation.heartbeat, prevUplink);
+        scheduleUplink(uplinkOffset, prevUplink);
         
         deviceState = SHOW_MEAS;
       }
@@ -1154,6 +1174,15 @@ void loop() {
       break;
     }
     case(SLEEP): {
+      // if something is happening, stay active
+      if(wifiMode || usbState) {
+        if(!node.isActivated()) {
+          deviceState = JOIN;
+        } else if(tNow + MEDIUM >= nextUplink) {
+          deviceState = START_PM;
+        }
+        break;
+      }
       turnOff();
       
       deviceState = JOIN;

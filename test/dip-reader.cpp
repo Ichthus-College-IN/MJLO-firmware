@@ -16,3 +16,18 @@ void loop() {
 
     delay(2000);
 }
+
+/*
+
+...                       K
+
+000 = 10m + OTAA + GNSS | uplink
+100 = 30s + OTAA + GNSS | uplink
+010 = 10m +  ABP + GNSS | uplink
+110 = 30s +  ABP + GNSS | uplink
+001 = 10m + OTAA + _    | uplink
+101 = 30s + OTAA + _    | uplink
+011 = 30s + WiFi + _    | WiFi
+111 =  1s + WiFi + _    | WiFi
+
+*/

@@ -2,6 +2,7 @@
 #include "pins.h"
 
 void setup() {
+    Serial.begin(115200);
     pinMode(BAT_ADC, INPUT);
     pinMode(BAT_CTRL, INPUT_PULLUP);
 }
