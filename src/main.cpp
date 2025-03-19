@@ -147,11 +147,17 @@ int ext1WakePinStatus() {
 }
 
 void writeUplinkToLog() {
-  snprintf(newDateBuf, 11, "%04d-%02d-%02d", gps.date.year(), gps.date.month(), gps.date.day());
+  time_t now = time(NULL);
+	struct tm *timeInfo = localtime(&now);
+
+  snprintf(newDateBuf, 11, "%04d-%02d-%02d", 
+           timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday);
+  snprintf(timeBuf, 9, "%02d:%02d:%02d", 
+          timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
+
   if (newDateBuf != dateBuf)
     checkAvailableStorage(newDateBuf);
   memcpy(dateBuf, newDateBuf, 11);
-  snprintf(timeBuf, 9, "%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
 
   char line[128];
   snprintf(&line[ 0],10, "%s,", timeBuf);
@@ -318,7 +324,7 @@ void VextOff() {
 }
 
 void readDip() {
-  uint8_t dip1 = LOW;//!digitalRead(DIP1);
+  uint8_t dip1 = !digitalRead(DIP1);
   uint8_t dip2 = !digitalRead(DIP2);
   uint8_t dip3 = !digitalRead(DIP3);
   uint8_t dip = (dip1 << 2) | (dip2 << 1) | (dip3 << 0);
@@ -682,9 +688,9 @@ void setup() {
   pinMode(LED_B, OUTPUT);
   pinMode(EPD_BUSY, INPUT);  // TFT_BL
   pinMode(EPD_CS, OUTPUT);
-  pinMode(DIP1, INPUT);
-  pinMode(DIP2, INPUT);
-  pinMode(DIP3, INPUT);
+  pinMode(DIP1, INPUT_PULLUP);
+  pinMode(DIP2, INPUT_PULLUP);
+  pinMode(DIP3, INPUT_PULLUP);
 
   battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
   powerState = (digitalRead(POWER) == HIGH);
@@ -1063,13 +1069,14 @@ void loop() {
     case(WAIT_GNSS): {
       // if got a fix for five consecutive seconds, send uplink
       if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
-        deviceState = SENDRECEIVE;
         Serial1.end();
         Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
                         gps.time.hour(), gps.time.minute(), gps.time.second());
         Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
                         gps.hdop.hdop(), gps.satellites.value());
-                        
+        
+        setSystemTimeFromGPS();
+                
         deviceState = SENDRECEIVE;
       }
       // TODO wrap back around to measuring while no GNSS fix
