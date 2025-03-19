@@ -16,21 +16,19 @@
 #include <SensirionI2CSen5x.h>
 
 #include <Adafruit_GFX.h>
-#include <Adafruit_ST7735.h>
 #include <GxEPD2_BW.h>
 
 #include "config.h"
 #include "flash.h"
 #include "lorawan.h"
 #include "gnss.h"
-#include "display.h"
 #include "accelerometer.h"
 #include "soundsensor.h"
 #include "measurement.h"
 #include "fs_browser.h"
 #include "serial.h"
 
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFTEPD_DC, TFTEPD_MOSI, TFTEPD_SCK, TFTEPD_RST);
+SPIClass spiST(HSPI);
 Adafruit_TSL2591 tsl = Adafruit_TSL2591();
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_BME680 bme = Adafruit_BME680(&Wire);
@@ -50,7 +48,7 @@ bool key, doGNSS;
 uint32_t tStart;
 
 enum dipIntervals {
-  FAST = 1,
+  FAST = 5,
   MEDIUM = 30,
   SLOW = 600,
 };
@@ -66,7 +64,6 @@ enum DeviceStates {
 	START_PM,
 	START_MIC,
 	START_CO2,
-	MEAS_BAT,
 	MEAS_TPH,
 	MEAS_LUM,
 	MEAS_UV,
@@ -177,6 +174,8 @@ void writeUplinkToLog() {
 uint8_t prepareTxFrame() {
   uint8_t port = 1;             // default port 1
   if(isMotion) port |= BIT(1);  // set second bit in case of motion
+
+  Serial.printf("Battery: %d mV\r\n", battMillivolts);
 
   // battery
   appData[0] = max(0, min(255, int((battMillivolts - 2500) / 10)));
@@ -311,16 +310,11 @@ void closeSerial() {
 void VextOn() {
   pinMode(V_EXT, OUTPUT);
   digitalWrite(V_EXT, HIGH);  // active HIGH
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, HIGH);  // active HIGH
 }
 
 void VextOff() {
   pinMode(V_EXT, OUTPUT);
   digitalWrite(V_EXT, LOW);
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, LOW);
-  pinMode(EPD_BUSY, INPUT);
 }
 
 void readDip() {
@@ -357,6 +351,7 @@ void readDip() {
       dipInterval = SLOW, dipMode = OTAA, dipGnss = true, dipWifi = false;
       break;
   }
+  // TODO add USR button behaviour: uplink over LoRa/WiFi
   Serial.printf("DIP: %d%d%d, Int: %d, Mode: %d, Gnss: %d, WiFi: %d\r\n", 
                 dip1, dip2, dip3, dipInterval, dipMode, dipGnss, dipWifi);
 }
@@ -366,7 +361,7 @@ void turnOff() {
 
   // handle Timer source if the device is enabled
   if(digitalRead(POWER) == HIGH && !powerIsLow) {
-    uint64_t timeToSleep = nextUplink - tNow - 30;
+    uint64_t timeToSleep = nextUplink - tNow - MEDIUM;
     esp_sleep_enable_timer_wakeup(timeToSleep * 1000000ULL);
   }
 
@@ -374,7 +369,7 @@ void turnOff() {
   bool wakeLevel0;
   if(digitalRead(POWER) == LOW) {      // turned off?
     wakePin0 = (gpio_num_t)POWER;       // listen to power-button
-    wakeLevel0 = LOW;
+    wakeLevel0 = HIGH;
 
   } else {                          // turned on?
     wakePin0 = (gpio_num_t)KEY;       // listen to action-button
@@ -387,14 +382,14 @@ void turnOff() {
   uint64_t wakePins1 = 0x00000000;  // no pin interrupts
   esp_sleep_ext1_wakeup_mode_t wakeLevel1;
   if(digitalRead(POWER) == HIGH) {       // turned on?
-    wakePins1 |= (1 << POWER);          // listen to power-off
-    if(cfg.operation.mobile && !isMotion && !powerIsLow) {
+    // wakePins1 |= (1 << POWER);          // listen to power-off
+    if(!powerIsLow) {
       wakePins1 |= (1 << ACC_INT);        // listen to accelGyro
     }
     wakeLevel1 = ESP_EXT1_WAKEUP_ANY_HIGH;
 
+    esp_sleep_enable_ext1_wakeup(wakePins1, wakeLevel1);
   }
-  esp_sleep_enable_ext1_wakeup(wakePins1, wakeLevel1);
 
   esp_deep_sleep_start();
 }
@@ -433,9 +428,6 @@ int execCommand(String &command) {
 
   if (command.indexOf("=") > 0) {
     int state = doSetting(key, value);
-    if (state == noError) {
-      displayStyle->displayFull();
-    }
     return state;
   }
 
@@ -547,7 +539,6 @@ void wifiEnable(int val) {
 
   wifiMode = WIFI_MODE_STA;
   if (connectWiFi()) {
-    displayStyle->displayWiFi();
     start_file_browser();
     serverRunning = true;
   }
@@ -687,7 +678,7 @@ void display_eink() {
 void setup() {
   pinMode(BAT_ADC, INPUT);
   pinMode(BAT_CTRL, INPUT_PULLUP);
-  pinMode(POWER, INPUT_PULLDOWN);
+  pinMode(POWER, INPUT);
   pinMode(LED_B, OUTPUT);
   pinMode(EPD_BUSY, INPUT);  // TFT_BL
   pinMode(EPD_CS, OUTPUT);
@@ -713,24 +704,14 @@ void setup() {
 
   wakeup_reason = esp_sleep_get_wakeup_cause();
 
-  // third, handle motion interrupt - might be able to go right back to sleep
+  // third, handle motion interrupt
   if(wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
     int pin = ext1WakePinStatus();
     switch(pin) {
-      // motion interrupt
+      // motion interrupt: go into active mode
       case(ACC_INT):
         isMotion = true;
-        // if we are past the motion-interval, go into immediate uplink 
-        if(tNow > prevUplink + uplinkOffset) {
-          scheduleUplink(30, tNow);
-          break;
-        }
-        // if we are within 30 seconds of next scheduled uplink, go into normal flow
-        if(tNow > nextUplink - 30) {
-          break;
-        }
-        // if neither of those applies, go back into sleep with motion interrupt disabled
-        turnOff();
+        scheduleUplink(0, tNow);
         break;
       default:
         break;
@@ -744,7 +725,7 @@ void setup() {
   if((int)wakePin0 == (int)POWER) {
     // if waking up after scheduled interval, reschedule for now
     if(nextUplink < tNow) {
-      scheduleUplink(30, tNow);
+      scheduleUplink(MEDIUM, tNow);
     }
     // otherwise, keep original interval to adhere to dutycycle
   }
@@ -761,8 +742,6 @@ void setup() {
   VextOn();
 
   spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI);            // SCK/CLK, MISO, MOSI, NSS/CS
-  st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
-  st7735.setRotation(2);
 
   // restore LoRaWAN session or join if needed
   if(lwBegin()) {
@@ -803,8 +782,6 @@ void setup() {
 
   if(dipGnss && isMotion) {
     doGNSS = true;
-    gps = TinyGPSPlus();
-    VextOn();
   } else {
     doGNSS = false;
     memcpy(&gps, gpsBuf, sizeof(TinyGPSPlus));
@@ -817,10 +794,6 @@ void setup() {
 
   PRINTF("Starting filesystem...\r\n");
   if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
-
-  setDisplayStyle(displayStyles[0], true);
-
-  loadMenus();
 
   // start the state machine
   if(!node.isActivated()) {
@@ -864,6 +837,20 @@ void loop() {
   delay(10);
   tNow = time(NULL);
 
+  battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
+  powerState = digitalRead(POWER) == HIGH;
+  usbState = usb_serial_jtag_is_connected();
+
+  // if neither powered nor charging, turn off
+  if(!powerState && !usbState) {
+    turnOff();
+  }
+
+  // if low battery, turn off
+  if(battMillivolts < 2700) {
+    goLowPower();
+  }
+
 	switch(deviceState) {
     case(IDLE): {
       // don't do anything, just stay awake
@@ -878,8 +865,6 @@ void loop() {
           deviceState = IDLE;
           return;
         }
-        // show uplink symbol
-        displayStyle->displayUplink();
         
         Serial.println("Activating...");
         lwRestore(false);
@@ -908,7 +893,7 @@ void loop() {
         } else {
           uplinkOffset = node.dutyCycleInterval((cfg.interval.dutycycle * 1000) / 24, node.getLastToA()) / 1000 - 5;
         }
-        uplinkOffset = max(uplinkOffset, (uint32_t)30);
+        uplinkOffset = max(uplinkOffset, (uint32_t)MEDIUM);
         scheduleUplink(uplinkOffset, prevUplink);
 
         if(node.isActivated()) {
@@ -925,6 +910,7 @@ void loop() {
     }
 		case(START_GNSS): {
       VextOn();
+      gps = TinyGPSPlus();
 
       // open GPS comms and configure for L1+L5, disabling GSA and GSV
       Serial1.setTimeout(50);
@@ -932,7 +918,7 @@ void loop() {
       Serial1.println("$CFGSYS,h35155*68");
       Serial1.println("$CFGMSG,0,2,0*05");
       Serial1.println("$CFGMSG,0,3,0*04");
-
+ 
       deviceState = WAIT_SATELLITE;
       break;
     }
@@ -944,10 +930,6 @@ void loop() {
                         gps.hdop.hdop(), gps.satellites.value());
 
         deviceState = START_PM;
-      }
-
-      if(!powerState && !usbState) {
-        turnOff();
       }
 
       break;
@@ -1040,16 +1022,9 @@ void loop() {
         // (void)scd4x.powerDown();
         Serial.printf("CO2: %d\r\n", co2);
         
-        deviceState = MEAS_BAT;
+        deviceState = MEAS_MIC;
       }
 
-      break;
-    }
-    case(MEAS_BAT): {
-      battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
-      Serial.printf("Battery: %d mV\r\n", battMillivolts);
-
-      deviceState = MEAS_MIC;
       break;
     }
     case(MEAS_MIC): {
@@ -1097,16 +1072,11 @@ void loop() {
                         
         deviceState = SENDRECEIVE;
       }
-      if(!powerState && !usbState) {
-        turnOff();
-      }
       // TODO wrap back around to measuring while no GNSS fix
       
       break;
     }
     case(SENDRECEIVE): {
-      displayStyle->displayUplink();
-
       radio.standby();
 
       // if device stopped moving, do a quick confirmed uplink series to settle datarate
@@ -1148,29 +1118,39 @@ void loop() {
       uplinkOffset = dipInterval;
 
       // if there was motion before this uplink, schedule another one soon
-      // wrap back up to the begin, and read the DIP switches for the next measurement
-      if(wasMotion) {
-        uplinkOffset = min(uplinkOffset, (uint32_t)MEDIUM);
-        scheduleUplink(uplinkOffset, prevUplink);
-        
-        Serial.println("Reading DIP registers");
-        readDip();
-        
-        deviceState = WAIT_SATELLITE;
-      } else {
-        scheduleUplink(uplinkOffset, prevUplink);
-        
-        deviceState = SHOW_MEAS;
+      if(dipInterval == SLOW && wasMotion) {
+        uplinkOffset = MEDIUM;
       }
+
+      scheduleUplink(uplinkOffset, prevUplink);
+      deviceState = SHOW_MEAS;
 
       break;
     }
     case(SHOW_MEAS): {
-      VextOff();
-
+      
+      pinMode(EPD_BUSY, INPUT);
+      
       display_eink();
 
-      deviceState = SLEEP;
+      // motion: read DIP and keep going
+      if(wasMotion) {
+
+        Serial.println("Reading DIP registers");
+        readDip();
+
+        if(dipGnss) {
+          deviceState = START_GNSS;
+        } else {
+          deviceState = START_PM;
+        }
+
+      // no motion: just go to sleep
+      } else {
+        deviceState = SLEEP;
+
+      }
+      
       break;
     }
     case(SLEEP): {
@@ -1183,6 +1163,7 @@ void loop() {
         }
         break;
       }
+      VextOff();
       turnOff();
       
       deviceState = JOIN;
