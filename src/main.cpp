@@ -692,9 +692,9 @@ void setup() {
   pinMode(DIP2, INPUT_PULLUP);
   pinMode(DIP3, INPUT_PULLUP);
 
-  battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
   powerState = (digitalRead(POWER) == HIGH);
   usbState = usb_serial_jtag_is_connected();
+  battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
 
   tNow = time(NULL);
 
@@ -852,10 +852,10 @@ void loop() {
     turnOff();
   }
 
-  // if low battery, turn off
-  if(battMillivolts < 2700) {
-    goLowPower();
-  }
+  // // if low battery, turn off
+  // if(battMillivolts < 2000 && deviceState < SENDRECEIVE) {
+  //   goLowPower();
+  // }
 
 	switch(deviceState) {
     case(IDLE): {
@@ -894,12 +894,7 @@ void loop() {
         tNow = time(NULL);  // update tNow as lwActivate() is blocking
 
         // calculate when next uplink should be scheduled
-        if(cfg.interval.fixed) {
-          uplinkOffset = cfg.interval.period;
-        } else {
-          uplinkOffset = node.dutyCycleInterval((cfg.interval.dutycycle * 1000) / 24, node.getLastToA()) / 1000 - 5;
-        }
-        uplinkOffset = max(uplinkOffset, (uint32_t)MEDIUM);
+        uplinkOffset = max(dipInterval, MEDIUM);
         scheduleUplink(uplinkOffset, prevUplink);
 
         if(node.isActivated()) {
