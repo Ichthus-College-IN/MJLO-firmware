@@ -63,8 +63,8 @@ enum DeviceStates {
   WAIT_SATELLITE,
 	START_PM,
 	START_MIC,
-	START_CO2,
 	MEAS_TPH,
+	START_CO2,
 	MEAS_LUM,
 	MEAS_UV,
 	MEAS_CO2,
@@ -217,8 +217,8 @@ uint8_t prepareTxFrame() {
   memcpy(&appData[13], &mCO2, 2);
 
   // pm2.5, pm10
-  uint16_t mPM25 = max(0, min(1023, int(pm2_5 * 10)));
-  uint16_t mPM10 = max(0, min(1023, int(pm10_ * 10)));
+  uint16_t mPM25 = max(0, min(4095, int(pm2_5 * 10)));
+  uint16_t mPM10 = max(0, min(4095, int(pm10_ * 10)));
   appData[15] = (uint8_t)mPM25;             // pm2.5 LSB
   appData[16] = (uint8_t)mPM10;             // pm10  LSB
   appData[17] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
@@ -651,6 +651,14 @@ void display_eink() {
     epdDisplay.printf("CO2");
     epdDisplay.setCursor(25, 85 + 13);
     epdDisplay.printf("ppm");
+    epdDisplay.setCursor(81, 113 + 3);
+    epdDisplay.printf("Geluid");
+    epdDisplay.setCursor(81, 113 + 13);
+    epdDisplay.printf("dB(A)");
+    epdDisplay.setCursor(13, 85 + 3);
+    epdDisplay.printf("PM2.5");
+    epdDisplay.setCursor(25, 85 + 13);
+    epdDisplay.printf("ppm");
 
     epdDisplay.setTextSize(3);
     epdDisplay.setCursor(1, 1);
@@ -661,10 +669,8 @@ void display_eink() {
     epdDisplay.printf("%4.0f", pres);
     epdDisplay.setCursor(49, 85);
     epdDisplay.printf("%4d", co2);
-
     epdDisplay.setCursor(1, 113);
     epdDisplay.printf("%4.1f", db_avg);
-
     epdDisplay.setCursor(49, 141);
     epdDisplay.printf("%4.1f", pm2_5);
 
