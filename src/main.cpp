@@ -50,7 +50,7 @@ uint32_t tStart;
 enum dipIntervals {
   FAST = 5,
   MEDIUM = 30,
-  SLOW = 600,
+  SLOW = 900,
 };
 
 RTC_DATA_ATTR bool dipMode, dipGnss, dipWifi;
@@ -203,26 +203,27 @@ uint8_t prepareTxFrame() {
   uint16_t lLumi = max(0, min(65535, int(lumi)));
   memcpy(&appData[6], &lLumi, 2);
 
-  // uv
-  appData[8] = max(0, min(255, int(uva)));
+  // uv(-a)
+  uint16_t nUva = max(0, min(65535, (int)uva));
+  memcpy(&appData[8], &uva, 2);
 
   // db: min, avg, max
-  appData[9] = max(0, min(255, int((db_min - 32) * 4)));
-  appData[10] = max(0, min(255, int((db_avg - 32) * 4)));
-  appData[11] = max(0, min(255, int((db_max - 32) * 4)));
+  appData[10] = max(0, min(255, int((db_min - 32) * 4)));
+  appData[11] = max(0, min(255, int((db_avg - 32) * 4)));
+  appData[12] = max(0, min(255, int((db_max - 32) * 4)));
 
   // co2
   uint16_t mCO2 = (uint16_t)max(0, min(65535, (int)co2));
-  memcpy(&appData[12], &mCO2, 2);
+  memcpy(&appData[13], &mCO2, 2);
 
   // pm2.5, pm10
   uint16_t mPM25 = max(0, min(1023, int(pm2_5 * 10)));
   uint16_t mPM10 = max(0, min(1023, int(pm10_ * 10)));
-  appData[14] = (uint8_t)mPM25;             // pm2.5 LSB
-  appData[15] = (uint8_t)mPM10;             // pm10  LSB
-  appData[16] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
+  appData[15] = (uint8_t)mPM25;             // pm2.5 LSB
+  appData[16] = (uint8_t)mPM10;             // pm10  LSB
+  appData[17] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
 
-  appDataSize = 17;
+  appDataSize = 18;
 
   if(dipInterval == FAST) {  // includes VOC and NOx
     port |= BIT(2);
@@ -357,7 +358,7 @@ void readDip() {
       dipInterval = SLOW, dipMode = OTAA, dipGnss = true, dipWifi = false;
       break;
   }
-  // TODO add USR button behaviour: uplink over LoRa/WiFi
+
   Serial.printf("DIP: %d%d%d, Int: %d, Mode: %d, Gnss: %d, WiFi: %d\r\n", 
                 dip1, dip2, dip3, dipInterval, dipMode, dipGnss, dipWifi);
 }
@@ -961,22 +962,10 @@ void loop() {
 
       tStart = time(NULL);
 
-      deviceState = START_CO2;
-      break;
-    }
-    case(START_CO2): {
-      scd4x.begin(Wire, 0x62);
-      (void)scd4x.wakeUp();
-      
-      // manually call the measureSingleShot() registers as the library does a blocking call
-      uint8_t buffer_ptr[9] = { 0 };
-      SensirionI2CTxFrame txFrame =
-          SensirionI2CTxFrame::createWithUInt16Command(0x219d, buffer_ptr, 2);
-      (void)SensirionI2CCommunication::sendFrame(0x62, txFrame, Wire);
-
       deviceState = MEAS_TPH;
       break;
     }
+    // first read TPH, as the pressure will be used for CO2 calculation
     case(MEAS_TPH): {
       bme.begin();	// 119, &Wire
       bme.performReading();
@@ -984,9 +973,23 @@ void loop() {
       bme.performReading();
       temp = bme.temperature;
       humi = bme.humidity;
-      pres = bme.pressure / 100.0F;
+      pres = bme.pressure / 100.0f;
       Serial.printf("Temp: %.2f, humi: %.2f, pres: %.2f\r\n", temp, humi, pres);
       
+      deviceState = START_CO2;
+      break;
+    }
+    case(START_CO2): {
+      scd4x.begin(Wire, 0x62);
+      (void)scd4x.wakeUp();
+      scd4x.setAmbientPressure(bme.pressure);
+      
+      // manually call the measureSingleShot() registers as the library does a blocking call
+      uint8_t buffer_ptr[9] = { 0 };
+      SensirionI2CTxFrame txFrame =
+          SensirionI2CTxFrame::createWithUInt16Command(0x219d, buffer_ptr, 2);
+      (void)SensirionI2CCommunication::sendFrame(0x62, txFrame, Wire);
+
       deviceState = MEAS_LUM;
       break;
     }
