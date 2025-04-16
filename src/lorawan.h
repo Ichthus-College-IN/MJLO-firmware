@@ -27,12 +27,12 @@ RTC_DATA_ATTR uint8_t LWnoder[RADIOLIB_LORAWAN_NODER_BUF_SIZE];
 // LoRaWAN uplink/downlink parameters
 uint8_t fPort = 1;
 
-const size_t maxAppDataSize = 51;
-size_t appDataSize = 0;
-uint8_t appData[maxAppDataSize] = { 0 };
+const size_t maxFrameSize = 51;
+size_t frameUpSize = 0;
+uint8_t frameUp[maxFrameSize] = { 0 };
 
-size_t networkDataSize = 0;
-uint8_t networkData[maxAppDataSize] = { 0 };
+size_t frameDownSize = 0;
+uint8_t frameDown[maxFrameSize] = { 0 };
 
 LoRaWANEvent_t eventUp;
 LoRaWANEvent_t eventDown;

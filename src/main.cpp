@@ -89,7 +89,7 @@ uint16_t battMillivolts = 0;
 uint32_t lastBattUpdate = 0;
 bool powerIsLow = false;
 
-RTC_DATA_ATTR gpio_num_t wakePin0 = (gpio_num_t)0;
+RTC_DATA_ATTR uint64_t wakePins1 = 0;
 RTC_DATA_ATTR int numStationaryUplinks = 0;
 
 bool buttonPressed = false;
@@ -165,18 +165,18 @@ void writeUplinkToLog() {
   snprintf(&line[ 9], 9, "%08X", dev32);
   snprintf(&line[17],10, "%08X,", (uint32_t)cfg.actvn.otaa.devEUI);
   snprintf(&line[26], 3, "%d,", fPort);
-  for(int i = 0; i < appDataSize; i++) {
-    snprintf(&line[28+i*2], 3, "%02X", appData[i]);
+  for(int i = 0; i < frameUpSize; i++) {
+    snprintf(&line[28+i*2], 3, "%02X", frameUp[i]);
   }
   Serial.printf("[%s] %s\n", dateBuf, line);
   File file = LittleFS.open("/" + String(dateBuf) + ".csv", "a");
   file.println(line);
   file.close();
   RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 28);
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(appData, appDataSize);
+  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(frameUp, frameUpSize);
 }
 
-/* Prepares the payload of the frame */
+/* Prepares the payload of the frameUp */
 uint8_t prepareTxFrame() {
   uint8_t port = 1;             // default port 1
   if(isMotion) port |= BIT(1);  // set second bit in case of motion
@@ -184,56 +184,56 @@ uint8_t prepareTxFrame() {
   Serial.printf("Battery: %d mV\r\n", battMillivolts);
 
   // battery
-  appData[0] = max(0, min(255, int((battMillivolts - 2500) / 10)));
+  frameUp[0] = max(0, min(255, int((battMillivolts - 2500) / 10)));
 
   // temperature
   uint16_t cTemp = (uint16_t)max(0, min(32767, int(abs(temp) * 100)));
   if (temp < 0)
     cTemp |= (uint16_t(1) << 15);
-  memcpy(&appData[1], &cTemp, 2);
+  memcpy(&frameUp[1], &cTemp, 2);
 
   // humidity
-  appData[3] = max(0, min(255, int(humi * 2)));
+  frameUp[3] = max(0, min(255, int(humi * 2)));
 
   // pressure
   uint16_t pPres = max(0, min(65535, int(pres * 10)));
-  memcpy(&appData[4], &pPres, 2);
+  memcpy(&frameUp[4], &pPres, 2);
 
   // luminosity
   uint16_t lLumi = max(0, min(65535, int(lumi)));
-  memcpy(&appData[6], &lLumi, 2);
+  memcpy(&frameUp[6], &lLumi, 2);
 
   // uv(-a)
   uint16_t nUva = max(0, min(65535, (int)uva));
-  memcpy(&appData[8], &uva, 2);
+  memcpy(&frameUp[8], &uva, 2);
 
   // db: min, avg, max
-  appData[10] = max(0, min(255, int((db_min - 32) * 4)));
-  appData[11] = max(0, min(255, int((db_avg - 32) * 4)));
-  appData[12] = max(0, min(255, int((db_max - 32) * 4)));
+  frameUp[10] = max(0, min(255, int((db_min - 32) * 4)));
+  frameUp[11] = max(0, min(255, int((db_avg - 32) * 4)));
+  frameUp[12] = max(0, min(255, int((db_max - 32) * 4)));
 
   // co2
   uint16_t mCO2 = (uint16_t)max(0, min(65535, (int)co2));
-  memcpy(&appData[13], &mCO2, 2);
+  memcpy(&frameUp[13], &mCO2, 2);
 
   // pm2.5, pm10
   uint16_t mPM25 = max(0, min(4095, int(pm2_5 * 10)));
   uint16_t mPM10 = max(0, min(4095, int(pm10_ * 10)));
-  appData[15] = (uint8_t)mPM25;             // pm2.5 LSB
-  appData[16] = (uint8_t)mPM10;             // pm10  LSB
-  appData[17] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
+  frameUp[15] = (uint8_t)mPM25;             // pm2.5 LSB
+  frameUp[16] = (uint8_t)mPM10;             // pm10  LSB
+  frameUp[17] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
 
-  appDataSize = 18;
+  frameUpSize = 18;
 
   if(dipInterval == FAST) {  // includes VOC and NOx
     port |= BIT(2);
     
     uint16_t rawVoc = vocIndex*10;
     uint16_t rawNox = noxIndex*10;
-    memcpy(&appData[appDataSize+0], &rawVoc, 2);
-    memcpy(&appData[appDataSize+2], &rawNox, 2);
+    memcpy(&frameUp[frameUpSize+0], &rawVoc, 2);
+    memcpy(&frameUp[frameUpSize+2], &rawNox, 2);
     
-    appDataSize += 4;
+    frameUpSize += 4;
   }
   if(dipGnss) {
     port |= BIT(3);
@@ -250,13 +250,13 @@ uint8_t prepareTxFrame() {
     uint8_t rawHdop = (int)(gps.hdop.hdop() * 10);
     uint8_t rawSats = gps.satellites.value();
 
-    memcpy(&appData[appDataSize+0], &rawLat, 4);
-    memcpy(&appData[appDataSize+4], &rawLng, 4);
-    memcpy(&appData[appDataSize+8], &rawAlt, 2);
-    memcpy(&appData[appDataSize+10], &rawHdop, 1);
-    memcpy(&appData[appDataSize+11], &rawSats, 1);
+    memcpy(&frameUp[frameUpSize+0], &rawLat, 4);
+    memcpy(&frameUp[frameUpSize+4], &rawLng, 4);
+    memcpy(&frameUp[frameUpSize+8], &rawAlt, 2);
+    memcpy(&frameUp[frameUpSize+10], &rawHdop, 1);
+    memcpy(&frameUp[frameUpSize+11], &rawSats, 1);
 
-    appDataSize += 12;
+    frameUpSize += 12;
   }
 
 	return port;
@@ -265,7 +265,7 @@ uint8_t prepareTxFrame() {
 void sendUplink() {
   fPort = prepareTxFrame();           // parse payload
   prevUplink = tNow;
-  int16_t window = node.sendReceive(appData, appDataSize, fPort, networkData, &networkDataSize, 
+  int16_t window = node.sendReceive(frameUp, frameUpSize, fPort, frameDown, &frameDownSize, 
                                     cfg.uplink.confirmed, &eventUp, &eventDown);
   
   uint8_t *persist = node.getBufferSession();
@@ -372,31 +372,30 @@ void turnOff() {
     esp_sleep_enable_timer_wakeup(timeToSleep * 1000000ULL);
   }
 
-  // handle EXT0 source (power button or action button)
+  // handle EXT0 source (accelerometer)
+  gpio_num_t wakePin0;
   bool wakeLevel0;
-  if(digitalRead(POWER) == LOW) {      // turned off?
-    wakePin0 = (gpio_num_t)POWER;       // listen to power-button
+  // listen to accelerometer if powered on and battery charged
+  if(digitalRead(POWER) == HIGH && !powerIsLow) {
+    wakePin0 = (gpio_num_t)ACC_INT;
     wakeLevel0 = HIGH;
-
-  } else {                          // turned on?
-    wakePin0 = (gpio_num_t)KEY;       // listen to action-button
-    wakeLevel0 = LOW;
-
+    esp_sleep_enable_ext0_wakeup(wakePin0, wakeLevel0);
   }
-  esp_sleep_enable_ext0_wakeup(wakePin0, wakeLevel0);
 
-  // handle EXT1 sources (power button and accelerometer)
-  uint64_t wakePins1 = 0x00000000;  // no pin interrupts
+  // handle EXT1 sources (power button and user button)
+  uint64_t wakePins1 = 0x00000000;
   esp_sleep_ext1_wakeup_mode_t wakeLevel1;
-  if(digitalRead(POWER) == HIGH) {       // turned on?
-    // wakePins1 |= (1 << POWER);          // listen to power-off
-    if(!powerIsLow) {
-      wakePins1 |= (1 << ACC_INT);        // listen to accelGyro
-    }
+  // listen to power-off and button wake-up if powered on
+  if(digitalRead(POWER) == HIGH) {
+    wakePins1 |= (1 << POWER);
+    wakePins1 |= (1 << KEY);
+    wakeLevel1 = ESP_EXT1_WAKEUP_ANY_LOW;
+  // listen to just power-on if currently powered off
+  } else {
+    wakePins1 |= (1 << POWER);
     wakeLevel1 = ESP_EXT1_WAKEUP_ANY_HIGH;
-
-    esp_sleep_enable_ext1_wakeup(wakePins1, wakeLevel1);
   }
+  esp_sleep_enable_ext1_wakeup(wakePins1, wakeLevel1);
 
   esp_deep_sleep_start();
 }
@@ -655,9 +654,9 @@ void display_eink() {
     epdDisplay.printf("Geluid");
     epdDisplay.setCursor(81, 113 + 13);
     epdDisplay.printf("dB(A)");
-    epdDisplay.setCursor(13, 85 + 3);
+    epdDisplay.setCursor(13, 141 + 3);
     epdDisplay.printf("PM2.5");
-    epdDisplay.setCursor(25, 85 + 13);
+    epdDisplay.setCursor(25, 141 + 13);
     epdDisplay.printf("ppm");
 
     epdDisplay.setTextSize(3);
@@ -715,32 +714,37 @@ void setup() {
     goLowPower();
   }
 
+  // third, handle wakeup reason & behaviour
   wakeup_reason = esp_sleep_get_wakeup_cause();
 
-  // third, handle motion interrupt
-  if(wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
-    int pin = ext1WakePinStatus();
-    switch(pin) {
-      // motion interrupt: go into active mode
-      case(ACC_INT):
-        isMotion = true;
-        scheduleUplink(0, tNow);
-        break;
-      default:
-        break;
-    }
-  }
-
-  // if not woken from sleep, can immediately transmit
+  // if not woken from sleep, please transmit asap
   if(wakeup_reason < ESP_SLEEP_WAKEUP_EXT0) {
     scheduleUplink(0, tNow);
-  }
-  if((int)wakePin0 == (int)POWER) {
-    // if waking up after scheduled interval, reschedule for now
-    if(nextUplink < tNow) {
-      scheduleUplink(MEDIUM, tNow);
+  
+  // woken by motion interrupt: please transmit asap
+  } else 
+  if(wakeup_reason == ESP_SLEEP_WAKEUP_EXT0) {
+    isMotion = true;
+    scheduleUplink(0, tNow);
+  
+  // woken by power-on or action button
+  } else
+  if(wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
+    // get the reason for wakeup
+    int pin = ext1WakePinStatus();
+
+    // if just powered on, reschedule only if next uplink is in the past
+    // otherwise, a repeated power-off - power-on would result in repeated uplinks
+    if(pin == POWER) {
+      if(nextUplink < tNow) {
+        scheduleUplink(MEDIUM, tNow);
+      }
+
+    // if woken by pressing the action button, don't do anything extra for now
+    } else
+    if(pin == KEY) {
+      
     }
-    // otherwise, keep original interval to adhere to dutycycle
   }
 
   if(usbState) {
@@ -782,15 +786,17 @@ void setup() {
     accelSetup();
     accelAnyMotion();
 
+    // act as if there was motion to do full GNSS cycle etc.
+    isMotion = true;
+  }
+
+  if(isMotion) {
     // read the DIP configuration - this requires Vext enabled
     VextOn();
     delay(100);
 
     // update DIP read
     readDip();
-
-    // act as if there was motion to do full GNSS cycle etc.
-    isMotion = true;
   }
 
   if(dipGnss && isMotion) {
@@ -798,6 +804,7 @@ void setup() {
   } else {
     doGNSS = false;
     memcpy(&gps, gpsBuf, sizeof(TinyGPSPlus));
+    VextOff();
   }
 
   pinMode(KEY, INPUT);
