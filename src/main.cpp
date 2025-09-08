@@ -262,6 +262,26 @@ uint8_t prepareTxFrame() {
 	return port;
 }
 
+void parseDownlink() {
+  switch(eventDown.fPort) {
+    case 1: {
+      scd4x.stopPeriodicMeasurement();
+      uint16_t targetCO2 = 0, correctedCO2 = 0;
+      targetCO2 |= frameDown[0];
+      targetCO2 |= (frameDown[1] << 8);
+      scd4x.performForcedRecalibration(targetCO2, correctedCO2);
+    } break;
+    case 2: {
+
+    } break;
+    case 3: {
+
+    } break;
+    default: {
+    } break;
+  }
+}
+
 void sendUplink() {
   fPort = prepareTxFrame();           // parse payload
   prevUplink = tNow;
@@ -280,6 +300,7 @@ void sendUplink() {
   }
   if(window > 0) {
     wasDownlink = true;
+    parseDownlink();
   } else {
     wasDownlink = false;
   }
@@ -1104,6 +1125,7 @@ void loop() {
           const uint8_t data[1] = { drNew };
           uint8_t rxWindow = node.sendReceive(data, 1, 128, true);
           if(rxWindow > 0) {
+            parseDownlink();
             break;
           }
           if(drNew == 0) {
