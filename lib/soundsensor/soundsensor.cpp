@@ -82,6 +82,7 @@ void SoundSensor::begin(int bclk, int lrclk, int din){
 
 void SoundSensor::disable() {
   _err = i2s_channel_disable(rx_chan);
+  i2s_del_channel(rx_chan);
   if (_err != ESP_OK) {
       printf("Failed uninstalling I2S driver: %d\n", _err);
       while (true);
