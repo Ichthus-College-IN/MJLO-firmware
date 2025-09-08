@@ -28,6 +28,8 @@
 #include "fs_browser.h"
 #include "serial.h"
 
+#include <SD.h>
+
 SPIClass spiST(HSPI);
 Adafruit_TSL2591 tsl = Adafruit_TSL2591();
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
@@ -714,6 +716,89 @@ void display_eink() {
   delay(50);
 }
 
+static const char *TAG = "FS_COPY";
+// -----------------------------------------------------------------------------
+// Helper: recursively copy a directory from LittleFS to SD.
+// -----------------------------------------------------------------------------
+bool copyDirRecursive(fs::FS &fsSrc, const String &srcPath, fs::FS &fsDst, const String &dstPath) {
+  // Open the source directory
+  File srcDir = fsSrc.open(srcPath.c_str());
+  if (!srcDir || !srcDir.isDirectory()) {
+    Serial.printf("  Failed to open source dir: %s\n", srcPath.c_str());
+    return false;
+  }
+
+  // Ensure destination directory exists (create recursively)
+  if (!fsDst.exists(dstPath)) {
+    if (!fsDst.mkdir(dstPath)) {
+      Serial.printf("  Failed to create destination dir: %s\n", dstPath.c_str());
+      srcDir.close();
+      return false;
+    }
+  }
+
+  // Iterate through everything inside srcDir
+  File entry = srcDir.openNextFile();
+  while (entry) {
+    String entryName = entry.name(); // e.g. "/foo.txt" or "/subdir"
+    // Build relative path from srcPath
+    String relPath = entryName.substring(srcPath.length());
+    if (relPath.startsWith("/")) {
+      relPath = relPath.substring(1);
+    }
+
+    String srcFullPath = "/" + entryName;                     // e.g. "/dir1/file.txt"
+    String dstFullPath = dstPath + "/" + relPath;       // e.g. "/backup/dir1/file.txt"
+
+    if (entry.isDirectory()) {
+      // Recursively copy sub-directory
+      Serial.printf("  Creating dir: %s\n", dstFullPath.c_str());
+      copyDirRecursive(fsSrc, srcFullPath, fsDst, dstFullPath);
+    } else {
+      // It's a file: copy its contents
+      Serial.printf("  Copying file: %s → %s\n", srcFullPath.c_str(), dstFullPath.c_str());
+      // Open source file for reading
+      File fSrc = fsSrc.open(srcFullPath, FILE_READ);
+      if (!fSrc) {
+        Serial.printf("    Failed to open source file: %s\n", srcFullPath.c_str());
+        entry.close();
+        continue;
+      }
+
+      // If destination file already exists, remove it first
+      if (fsDst.exists(dstFullPath)) {
+        fsDst.remove(dstFullPath);
+      }
+
+      // Open destination file for writing (will create it)
+      File fDst = fsDst.open(dstFullPath, FILE_WRITE);
+      if (!fDst) {
+        Serial.printf("    Failed to open destination file: %s\n", dstFullPath.c_str());
+        fSrc.close();
+        entry.close();
+        continue;
+      }
+
+      // Copy data in 4KB chunks
+      const size_t BUF_SIZE = 4096;
+      uint8_t buf[BUF_SIZE];
+      while (true) {
+        size_t bytesRead = fSrc.read(buf, BUF_SIZE);
+        if (bytesRead == 0) break;
+        fDst.write(buf, bytesRead);
+      }
+
+      fDst.close();
+      fSrc.close();
+    }
+
+    entry = srcDir.openNextFile();
+  }
+
+  srcDir.close();
+  return true;
+}
+
 void setup() {
   pinMode(BAT_ADC, INPUT);
   pinMode(BAT_CTRL, INPUT_PULLUP);
@@ -841,6 +926,40 @@ void setup() {
 
   PRINTF("Starting filesystem...\r\n");
   if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
+
+  if (SD.begin(SD_CS, spiSX)) {
+    Serial.println("SD card mounted.");
+    // 3) Check if SD card is really present & writable
+    uint64_t cardSize = SD.cardSize() / (1024ULL * 1024ULL);
+    Serial.printf("SD Card Size: %llu MB\n", cardSize);
+
+    // 4) Copy everything from LittleFS root "/" → SD root "/MJLO-xxx"
+    //    Adjust destination folder on SD as you see fit.
+    const String LFSSource = "/";
+    const String SDestination = "/" + cfg.wl2g4.name;
+
+    Serial.printf("Starting recursive copy from LittleFS '%s' to SD '%s'\n",
+                  LFSSource.c_str(), SDestination.c_str());
+
+    if (copyDirRecursive(LittleFS, LFSSource, SD, SDestination)) {
+      Serial.println("All files copied successfully.");
+    } else {
+      Serial.println("Errors occurred during copy.");
+    }
+
+    SD.end();
+
+    Serial.println("==== Copy Complete ====");
+
+    for(int i = 0; i < 20; i++) {
+      digitalWrite(LED_B, HIGH);
+      delay(50);
+      digitalWrite(LED_B, LOW);
+      delay(100);
+    }
+  } else {
+    Serial.println("No SD card.");
+  }
 
   // start the state machine
   if(!node.isActivated()) {
