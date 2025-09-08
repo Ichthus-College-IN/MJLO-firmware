@@ -41,6 +41,7 @@ GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT>
 			epdDisplay(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
 
 float temp, humi, pres, lumi, db_min, db_avg, db_max;
+float scd_temp, scd_hum;
 float pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex;
 uint16_t co2;
 uint32_t uva;
@@ -186,14 +187,19 @@ uint8_t prepareTxFrame() {
   // battery
   frameUp[0] = max(0, min(255, int((battMillivolts - 2500) / 10)));
 
-  // temperature
-  uint16_t cTemp = (uint16_t)max(0, min(32767, int(abs(temp) * 100)));
-  if (temp < 0)
-    cTemp |= (uint16_t(1) << 15);
-  memcpy(&frameUp[1], &cTemp, 2);
+  // SEN55 temperature and humidity (typically more accurate)
+  uint16_t sTemp = (uint16_t)max(0, min(32767, int(abs(scd_temp) * 100)));
+  if (scd_temp < 0)
+    sTemp |= (uint16_t(1) << 15);
+  memcpy(&frameUp[1], &sTemp, 2);
+  frameUp[3] = max(0, min(255, int(scd_hum * 2)));
 
-  // humidity
-  frameUp[3] = max(0, min(255, int(humi * 2)));
+  // // BME680 temperature and humidity (currently not in use)
+  // uint16_t cTemp = (uint16_t)max(0, min(32767, int(abs(temp) * 100)));
+  // if (temp < 0)
+  //   cTemp |= (uint16_t(1) << 15);
+  // memcpy(&frameUp[1], &cTemp, 2);
+  // frameUp[3] = max(0, min(255, int(humi * 2)));
 
   // pressure
   uint16_t pPres = max(0, min(65535, int(pres * 10)));
@@ -1055,7 +1061,6 @@ void loop() {
       (void)scd4x.getDataReadyStatus(co2_ready);
 
       if(co2_ready) {
-        float scd_temp, scd_hum;
         (void)scd4x.readMeasurement(co2, scd_temp, scd_hum);
         // (void)scd4x.powerDown();
         Serial.printf("CO2: %d\r\n", co2);
