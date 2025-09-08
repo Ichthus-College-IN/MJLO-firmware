@@ -73,7 +73,7 @@ bool connectWiFi() {
     // the lines below are for connecting to a WPA2 enterprise network 
     // (taken from the oficial wpa2_enterprise example from esp-idf)
     ESP_ERROR_CHECK( esp_eap_client_set_identity((uint8_t *)cfg.wl2g4.user.c_str(), strlen(cfg.wl2g4.user.c_str())) );
-    ESP_ERROR_CHECK( esp_eap_client_set_identity((uint8_t *)cfg.wl2g4.user.c_str(), strlen(cfg.wl2g4.user.c_str())) );
+    ESP_ERROR_CHECK( esp_eap_client_set_username((uint8_t *)cfg.wl2g4.user.c_str(), strlen(cfg.wl2g4.user.c_str())) );
     ESP_ERROR_CHECK( esp_eap_client_set_password((uint8_t *)cfg.wl2g4.pass.c_str(), strlen(cfg.wl2g4.pass.c_str())) );
     ESP_ERROR_CHECK( esp_wifi_sta_enterprise_enable() );
     WiFi.begin(cfg.wl2g4.ssid.c_str());
