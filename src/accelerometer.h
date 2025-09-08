@@ -18,7 +18,7 @@ void accelAnyMotion() {
   bmi2_sens_config anyMotionConfig;
   anyMotionConfig.type = BMI2_ANY_MOTION;
   anyMotionConfig.cfg.any_motion.duration = 1;
-  anyMotionConfig.cfg.any_motion.threshold = 150;
+  anyMotionConfig.cfg.any_motion.threshold = 600;
   anyMotionConfig.cfg.any_motion.select_x = BMI2_ENABLE;
   anyMotionConfig.cfg.any_motion.select_y = BMI2_ENABLE;
   anyMotionConfig.cfg.any_motion.select_z = BMI2_ENABLE;
