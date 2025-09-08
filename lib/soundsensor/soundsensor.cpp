@@ -1,5 +1,7 @@
 /*--------------------------------------------------------------------
-  This file is part of the TTN-Apeldoorn Sound Sensor.
+  This file is originally part of the TTN-Apeldoorn Sound Sensor,
+  developed by Marcel Meek and Remko Welling.
+  It is modified and updated for MJLO by Steven Boonstoppel.
 
   This code is free software:
   you can redistribute it and/or modify it under the terms of a Creative
@@ -12,11 +14,6 @@
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   --------------------------------------------------------------------*/
 
-/*!
- * \file SoundSensor.cpp
- * \author Marcel Meek, Remko Welling (remko@rfsee.nl)
- */
-
 #include "soundsensor.h"
 #include "arduinoFFT.h"
 
@@ -25,7 +22,7 @@ i2s_chan_handle_t rx_chan = NULL;
 
 
 SoundSensor::SoundSensor() {
-  _fft = new arduinoFFT(_real, _imag, SAMPLES, SAMPLES);
+  _fft = new ArduinoFFT<float>(_real, _imag, SAMPLES, SAMPLES);
   _runningDC = 0.0;
   _runningN = 0;
   offset( 0.0);
@@ -105,10 +102,10 @@ float* SoundSensor::readSamples() {
   integerToFloat(_samples, _real, _imag, SAMPLES);
 
   // apply HANN window, optimal for energy calculations
-  _fft->Windowing(FFT_WIN_TYP_HANN, FFT_FORWARD);     // changed was FFT_WIN_TYP_FLT_TOP
+  _fft->windowing(FFT_WIN_TYP_HANN, FFT_FORWARD);
   
   // do FFT processing
-  _fft->Compute(FFT_FORWARD);
+  _fft->compute(FFT_FORWARD);
 
   // calculate energy in each bin
   calculateEnergy(_real, _imag, SAMPLES);

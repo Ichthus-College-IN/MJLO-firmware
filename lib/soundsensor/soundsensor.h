@@ -1,5 +1,7 @@
 /*--------------------------------------------------------------------
-  This file is part of the TTN-Apeldoorn Sound Sensor.
+  This file is originally part of the TTN-Apeldoorn Sound Sensor,
+  developed by Marcel Meek and Remko Welling.
+  It is modified and updated for MJLO by Steven Boonstoppel.
 
   This code is free software:
   you can redistribute it and/or modify it under the terms of a Creative
@@ -11,11 +13,6 @@
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   --------------------------------------------------------------------*/
-
-/*!
- * \file SoundSensor.cpp
- * \author Marcel Meek, Remko Welling (remko@rfsee.nl)
- */
  
 #ifndef __SOUND_SENSOR_H_
 #define __SOUND_SENSOR_H_
@@ -52,7 +49,7 @@ class SoundSensor {
     void offset( float dB);       ///< mic. correction in dB
 
   private:
-    arduinoFFT   *_fft;               ///< FFT class
+    ArduinoFFT<float> *_fft;               ///< FFT class
     // FFT buffers
     float         _real[SAMPLES];
     float         _imag[SAMPLES];
