@@ -19,107 +19,104 @@
 
 #include "soundsensor.h"
 #include "arduinoFFT.h"
-#include <soc/i2s_reg.h>
 
 const i2s_port_t I2S_PORT = I2S_NUM_0;
+i2s_chan_handle_t rx_chan = NULL;
 
-// The I2S config as per the example
-const i2s_config_t i2s_config = {
-    .mode                 = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX),  // receive, not transfer
-    .sample_rate          = SAMPLE_FREQ,
-    .bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT,                  // only 24 bits are used
-    .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,                  // there's a 'bug' in ESP-IDF which messed up L/R selector
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,                       // Interrupt level 1
-    .dma_buf_count        = 8,                                          // number of buffers
-    .dma_buf_len          = 1024,                                       // BLOCK_SIZE, samples per buffer
-    .use_apll             = true
-};
 
 SoundSensor::SoundSensor() {
-    _fft = new arduinoFFT(_real, _imag, SAMPLES, SAMPLES);
-    _runningDC = 0.0;
-    _runningN = 0;
-    offset( 0.0);
+  _fft = new arduinoFFT(_real, _imag, SAMPLES, SAMPLES);
+  _runningDC = 0.0;
+  _runningN = 0;
+  offset( 0.0);
 }
 
 SoundSensor::~SoundSensor() {
-    delete _fft;
+  delete _fft;
 }
 
 void SoundSensor::begin(int bclk, int lrclk, int din){
-    // pin config MEMS microphone
-    const i2s_pin_config_t pin_config = {
-        .bck_io_num = bclk,
-        .ws_io_num = lrclk,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = din
-    };
-    
-    // Configuring the I2S driver and pins.
-    // This function must be called before any I2S driver read/write operations.
-    _err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-    if (_err != ESP_OK) {
-        printf("Failed installing I2S driver: %d\n", _err);
-        while (true);
-    }
+  // https://esp32.com/viewtopic.php?f=18&t=35402
+  i2s_chan_config_t rx_chan_cfg = { 
+    .id = I2S_PORT, 
+    .role = I2S_ROLE_MASTER, 
+    .dma_desc_num = 8, 
+    .dma_frame_num = 1024, 
+    .auto_clear_after_cb = false, 
+    .auto_clear_before_cb = false, 
+    .intr_priority = 0
+  };
+  rx_chan_cfg.auto_clear = true;
+  ESP_ERROR_CHECK(i2s_new_channel(&rx_chan_cfg, NULL, &rx_chan));
+  
+  i2s_std_config_t rx_std_cfg = {
+    .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_FREQ),
+    .slot_cfg = { 
+      .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT, 
+      .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO, 
+      .slot_mode = I2S_SLOT_MODE_MONO, 
+      .slot_mask = I2S_STD_SLOT_LEFT, 
+      .ws_width = I2S_DATA_BIT_WIDTH_32BIT, 
+      .ws_pol = false, 
+      .bit_shift = true, 
+      .left_align = true, 
+      .big_endian = false, 
+      .bit_order_lsb = false
+    },
+    .gpio_cfg = {
+      .mclk = I2S_GPIO_UNUSED,
+      .bclk = (gpio_num_t)bclk,
+      .ws = (gpio_num_t)lrclk,
+      .dout = I2S_GPIO_UNUSED,
+      .din = (gpio_num_t)din,
+      .invert_flags = {
+          .mclk_inv = false,
+          .bclk_inv = false,
+          .ws_inv = false,
+      },
+    },
+  };
+  
+  ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_chan, &rx_std_cfg));
+  ESP_ERROR_CHECK(i2s_channel_enable(rx_chan));
 
-    // https://esp32.com/viewtopic.php?f=18&t=35402#
-    // Delay by falling edge
-    REG_SET_BIT(I2S_RX_TIMING_REG(I2S_PORT), BIT(1));
-    // Force Philips mode
-    REG_SET_BIT(I2S_RX_CONF1_REG(I2S_PORT), I2S_RX_MSB_SHIFT);
-    
-    _err = i2s_set_pin(I2S_PORT, &pin_config);
-    if (_err != ESP_OK) {
-        printf("Failed setting pin: %d\n", _err);
-        while (true);
-    }
-    printf("I2S driver installed.\n");
+  printf("I2S driver installed.\n");
 }
 
 void SoundSensor::disable() {
-    _err = i2s_driver_uninstall(I2S_PORT);
-    if (_err != ESP_OK) {
-        printf("Failed uninstalling I2S driver: %d\n", _err);
-        while (true);
-    }
-    printf("I2S driver uninstalled.\n");
+  _err = i2s_channel_disable(rx_chan);
+  if (_err != ESP_OK) {
+      printf("Failed uninstalling I2S driver: %d\n", _err);
+      while (true);
+  }
+  printf("I2S driver uninstalled.\n");
 }
 
 float* SoundSensor::readSamples() {
-    // Read multiple samples at once and calculate the sound pressure
-    
-    size_t num_bytes_read;
-    _err = i2s_read(
-        I2S_PORT,
-        (char *) _samples,
-        BLOCK_SIZE * 4,        // 4 bytes per sample
-        &num_bytes_read,
-        portMAX_DELAY
-    );    // no timeout
-    
-    //printf("bytes read %d\n", num_bytes_read);
-    
-    if(_err != ESP_OK){
-        printf("%d err\n",_err);
-    }
+  // Read multiple samples at once and calculate the sound pressure
+  
+  size_t num_bytes_read;
+  _err = i2s_channel_read(rx_chan, (uint8_t *)_samples, BLOCK_SIZE * sizeof(int32_t), &num_bytes_read, portMAX_DELAY);
+  
+  if(_err != ESP_OK){
+      printf("%d err\n",_err);
+  }
 
-    integerToFloat(_samples, _real, _imag, SAMPLES);
+  integerToFloat(_samples, _real, _imag, SAMPLES);
 
-    // apply HANN window, optimal for energy calculations
-    _fft->Windowing(FFT_WIN_TYP_HANN, FFT_FORWARD);     // changed was FFT_WIN_TYP_FLT_TOP
-    
-    // do FFT processing
-    _fft->Compute(FFT_FORWARD);
+  // apply HANN window, optimal for energy calculations
+  _fft->Windowing(FFT_WIN_TYP_HANN, FFT_FORWARD);     // changed was FFT_WIN_TYP_FLT_TOP
+  
+  // do FFT processing
+  _fft->Compute(FFT_FORWARD);
 
-    // calculate energy in each bin
-    calculateEnergy(_real, _imag, SAMPLES);
+  // calculate energy in each bin
+  calculateEnergy(_real, _imag, SAMPLES);
 
-    // sum up energy in bin for each octave
-    sumEnergy(_real, _energy);
+  // sum up energy in bin for each octave
+  sumEnergy(_real, _energy);
 
-    return _energy;
+  return _energy;
 }
 
 // convert WAV integers to float

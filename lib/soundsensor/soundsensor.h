@@ -21,7 +21,7 @@
 #define __SOUND_SENSOR_H_
 
 #include <Arduino.h>
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
 #include "arduinoFFT.h"
 
 #define FACTOR 30.0        /// \todo to be cheked why this 10.0 ?
