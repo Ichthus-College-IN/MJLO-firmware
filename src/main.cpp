@@ -40,7 +40,7 @@ SoundSensor mic;
 
 // e-ink display: GDEY0213B74 122x250, SSD1680 (FPC-A002 20.04.08)
 GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> 
-			epdDisplay(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
+      epdDisplay(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
 
 float temp, humi, pres, lumi, db_min, db_avg, db_max;
 float scd_temp, scd_hum;
@@ -61,22 +61,22 @@ RTC_DATA_ATTR dipIntervals dipInterval;
 
 enum DeviceStates {
   IDLE,
-	JOIN,
-	START_GNSS,
+  JOIN,
+  START_GNSS,
   WAIT_SATELLITE,
-	START_PM,
-	START_MIC,
-	MEAS_TPH,
-	START_CO2,
-	MEAS_LUM,
-	MEAS_UV,
-	MEAS_CO2,
-	MEAS_MIC,
-	MEAS_PM,
-	WAIT_GNSS,
+  START_PM,
+  START_MIC,
+  MEAS_TPH,
+  START_CO2,
+  MEAS_LUM,
+  MEAS_UV,
+  MEAS_CO2,
+  MEAS_MIC,
+  MEAS_PM,
+  WAIT_GNSS,
   SENDRECEIVE,
-	SHOW_MEAS,
-	SLEEP,
+  SHOW_MEAS,
+  SLEEP,
   MENU,   // TODO
   NONE
 };
@@ -151,7 +151,7 @@ int ext1WakePinStatus() {
 
 void writeUplinkToLog() {
   time_t now = time(NULL);
-	struct tm *timeInfo = localtime(&now);
+  struct tm *timeInfo = localtime(&now);
 
   snprintf(newDateBuf, 11, "%04d-%02d-%02d", 
            timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday);
@@ -267,7 +267,7 @@ uint8_t prepareTxFrame() {
     frameUpSize += 12;
   }
 
-	return port;
+  return port;
 }
 
 void parseDownlink() {
@@ -613,58 +613,58 @@ void goLowPower() {
   turnOff();
 }
 
-static float zweighting[] = Z_WEIGHTING;		// weighting lists
-static Measurement zMeasurement( zweighting);	// measurement buffers
+static float zweighting[] = Z_WEIGHTING;    // weighting lists
+static Measurement zMeasurement( zweighting);  // measurement buffers
 
 volatile bool mic_stop = false;
 volatile bool mic_stopped = false;
 
 void mic_get_db(void * params) {
 
-	mic.offset(-1.8);		// for SPH0645
-	mic.begin(BCLK, LRCLK, DIN);
-	long startMic = millis();
-	bool reset = false;
+  mic.offset(-1.8);    // for SPH0645
+  mic.begin(BCLK, LRCLK, DIN);
+  long startMic = millis();
+  bool reset = false;
 
-	while (!mic_stop) {
-		float* energy = mic.readSamples();
-		zMeasurement.update(energy);
-		if (millis() - startMic > 3000) {
-			if (!reset) {
-				zMeasurement.reset();
-				reset = true;
-			}
-		}
-	}
-	zMeasurement.calculate();
-	mic.disable();
-	mic_stopped = true;
-	vTaskDelete(NULL);
+  while (!mic_stop) {
+    float* energy = mic.readSamples();
+    zMeasurement.update(energy);
+    if (millis() - startMic > 3000) {
+      if (!reset) {
+        zMeasurement.reset();
+        reset = true;
+      }
+    }
+  }
+  zMeasurement.calculate();
+  mic.disable();
+  mic_stopped = true;
+  vTaskDelete(NULL);
 }
 
 // Function to extract the decimal part and return it as a String without the integer part
 String to_decimal(float value) {
-	String decimalString = String(value, 1);
-	int pos = decimalString.indexOf(".");
-	return decimalString.substring(pos);
+  String decimalString = String(value, 1);
+  int pos = decimalString.indexOf(".");
+  return decimalString.substring(pos);
 }
 
 void display_value(float val, String unit, int16_t x, int16_t y) { 
-	epdDisplay.setCursor(x, y);
-	epdDisplay.print(int(val));
-	epdDisplay.setCursor(x, y+8);
-	epdDisplay.print(to_decimal(val));
-	epdDisplay.setCursor(x, y+16);
-	epdDisplay.print(unit);
+  epdDisplay.setCursor(x, y);
+  epdDisplay.print(int(val));
+  epdDisplay.setCursor(x, y+8);
+  epdDisplay.print(to_decimal(val));
+  epdDisplay.setCursor(x, y+16);
+  epdDisplay.print(unit);
 }
 
 void display_eink() {
   Serial.println("Drawing values");
-	Serial.println(millis());
+  Serial.println(millis());
 
-	epdDisplay.setRotation(0);
-	epdDisplay.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
-	epdDisplay.setFont(0);
+  epdDisplay.setRotation(0);
+  epdDisplay.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
+  epdDisplay.setFont(0);
 
   epdDisplay.setPartialWindow(0, 0, 120, 250);
   epdDisplay.firstPage();
@@ -720,8 +720,8 @@ void display_eink() {
   }
   while (epdDisplay.nextPage());
 
-	epdDisplay.hibernate();
-	Serial.println(millis());
+  epdDisplay.hibernate();
+  Serial.println(millis());
   Serial.flush();
   delay(50);
 }
@@ -897,7 +897,7 @@ void setup() {
     Serial.println("No credentials - going into input mode:");
   }
 
-	Wire.begin(SDA0, SCL0);
+  Wire.begin(SDA0, SCL0);
 
   epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
   epdDisplay.init(115200, true, 2, false);
@@ -1027,7 +1027,7 @@ void loop() {
   //   goLowPower();
   // }
 
-	switch(deviceState) {
+  switch(deviceState) {
     case(IDLE): {
       // don't do anything, just stay awake
       break;
@@ -1079,7 +1079,7 @@ void loop() {
       }
       break;
     }
-		case(START_GNSS): {
+    case(START_GNSS): {
       VextOn();
       gps = TinyGPSPlus();
 
@@ -1121,13 +1121,13 @@ void loop() {
       mic_stopped = false;
 
       xTaskCreatePinnedToCore(
-        mic_get_db, 	/* Task function. */
-        "Task1",   		/* name of task. */
-        8192,   		/* Stack size of task */
-        NULL,    		/* parameter of the task */
-        1,     		/* priority of the task */
-        NULL,  		/* Task handle to keep track of created task */
-        0);    		/* pin task to core 0 */
+        mic_get_db,   /* Task function. */
+        "Task1",       /* name of task. */
+        8192,       /* Stack size of task */
+        NULL,        /* parameter of the task */
+        1,         /* priority of the task */
+        NULL,      /* Task handle to keep track of created task */
+        0);        /* pin task to core 0 */
 
       tStart = time(NULL);
 
@@ -1136,7 +1136,7 @@ void loop() {
     }
     // first read TPH, as the pressure will be used for CO2 calculation
     case(MEAS_TPH): {
-      bme.begin();	// 119, &Wire
+      bme.begin();  // 119, &Wire
       bme.performReading();
       delay(200);
       bme.performReading();
@@ -1244,7 +1244,7 @@ void loop() {
                         gps.hdop.hdop(), gps.satellites.value());
         
         setSystemTimeFromGPS();
-                
+        
         deviceState = SENDRECEIVE;
       }
       // TODO wrap back around to measuring while no GNSS fix
@@ -1343,7 +1343,7 @@ void loop() {
       turnOff();
       
       deviceState = JOIN;
-      break;	
+      break;  
     }
     default: {
       deviceState = IDLE;
@@ -1356,5 +1356,5 @@ void loop() {
 
   if(Serial1.available())
     handleSerialNmea();
-	
+  
 }
