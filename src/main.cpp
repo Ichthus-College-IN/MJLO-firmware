@@ -273,6 +273,9 @@ uint8_t prepareTxFrame() {
 void parseDownlink() {
   switch(eventDown.fPort) {
     case 1: {
+      if(frameDownSize != 2) {
+        return;
+      }
       scd4x.stopPeriodicMeasurement();
       uint16_t targetCO2 = 0, correctedCO2 = 0;
       targetCO2 |= frameDown[0];
@@ -280,7 +283,14 @@ void parseDownlink() {
       scd4x.performForcedRecalibration(targetCO2, correctedCO2);
     } break;
     case 2: {
-
+      if(frameDownSize != 3) {
+        return;
+      }
+      scd4x.stopPeriodicMeasurement();
+      scd4x.setAutomaticSelfCalibrationEnabled((uint16_t)frameDown[0]);
+      scd4x.setAutomaticSelfCalibrationTarget((uint16_t)(400 + frameDown[1]));
+      scd4x.setAutomaticSelfCalibrationStandardPeriod((uint16_t)frameDown[2]);
+      scd4x.persistSettings();
     } break;
     case 3: {
 
@@ -1140,8 +1150,9 @@ void loop() {
     }
     case(START_CO2): {
       scd4x.begin(Wire, 0x62);
-      (void)scd4x.wakeUp();
+      // scd4x.wakeUp();
       scd4x.setAmbientPressure(bme.pressure);
+      // scd4x.stopPeriodicMeasurement();
       
       // manually call the measureSingleShot() registers as the library does a blocking call
       uint8_t buffer_ptr[9] = { 0 };
@@ -1176,12 +1187,13 @@ void loop() {
       break;
     }
     case(MEAS_CO2): {
-      bool co2_ready;
-      (void)scd4x.getDataReadyStatus(co2_ready);
+      bool co2_ready = false;
+      scd4x.getDataReadyStatus(co2_ready);
 
+      // note: spec says this can take up to 5000ms, but I've never seen more than 4500ms 
       if(co2_ready) {
-        (void)scd4x.readMeasurement(co2, scd_temp, scd_hum);
-        // (void)scd4x.powerDown();
+        scd4x.readMeasurement(co2, scd_temp, scd_hum);
+        // scd4x.powerDown();
         Serial.printf("CO2: %d\r\n", co2);
         
         deviceState = MEAS_MIC;
