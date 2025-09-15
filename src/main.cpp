@@ -983,7 +983,7 @@ void handleSerialNmea() {
   }
 
   double hdop = gps.hdop.hdop();
-  if ((gps.location.age() < 2000) && (hdop <= 3) && (hdop > 0)) {
+  if ((gps.location.age() < 2000) && (hdop <= 2.5) && (hdop > 0)) {
     if(gps.time.second() != sec) {
       numConsecutiveFix = numConsecutiveFix >= 5 ? 5 : numConsecutiveFix + 1;
     }
