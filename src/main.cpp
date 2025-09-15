@@ -706,7 +706,7 @@ void display_eink() {
     width = max(0, min(104, width));
     epdDisplay.drawRoundRect(7, 240, 106, 11, 2, GxEPD_BLACK);
     epdDisplay.fillRect(8, 241, width, 9, GxEPD_BLACK);
-    epdDisplay.fillRect(8 + 104 - width, 241, 104 - width, 9, GxEPD_WHITE);
+    epdDisplay.fillRect(8 + width, 241, 104 - width, 9, GxEPD_WHITE);
   }
   while (epdDisplay.nextPage());
 
