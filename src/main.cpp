@@ -418,8 +418,12 @@ void turnOff() {
   if(digitalRead(POWER) == HIGH && !powerIsLow) {
     wakePin0 = (gpio_num_t)ACC_INT;
     wakeLevel0 = HIGH;
-    esp_sleep_enable_ext0_wakeup(wakePin0, wakeLevel0);
+  // otherwise, use EXT0 to listen for user button
+  } else {
+    wakePin0 = (gpio_num_t)KEY;
+    wakeLevel0 = LOW;
   }
+  esp_sleep_enable_ext0_wakeup(wakePin0, wakeLevel0);
 
   // handle EXT1 sources (power button and user button)
   uint64_t wakePins1 = 0x00000000;
@@ -429,7 +433,7 @@ void turnOff() {
     wakePins1 |= (1 << POWER);
     wakePins1 |= (1 << KEY);
     wakeLevel1 = ESP_EXT1_WAKEUP_ANY_LOW;
-  // listen to just power-on if currently powered off
+  // listen to just power-on if currently powered off (user button handled previously)
   } else {
     wakePins1 |= (1 << POWER);
     wakeLevel1 = ESP_EXT1_WAKEUP_ANY_HIGH;
