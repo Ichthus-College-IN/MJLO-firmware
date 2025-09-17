@@ -101,11 +101,12 @@ void lwActivate(uint8_t dr) {
   PRINTF("[LoRaWAN] Attempting network join ... ");
 
   radio.standby();
+  node.setDatarate(dr);
   
   if(cfg.actvn.method == OTAA) {
-    state = node.activateOTAA(dr);
+    state = node.activateOTAA();
   } else {
-    state = node.activateABP(dr);
+    state = node.activateABP();
   }
 
   radio.sleep();
