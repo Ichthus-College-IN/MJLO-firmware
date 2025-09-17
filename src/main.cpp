@@ -283,13 +283,17 @@ void parseDownlink() {
       scd4x.performForcedRecalibration(targetCO2, correctedCO2);
     } break;
     case 2: {
-      if(frameDownSize != 3) {
+      scd4x.stopPeriodicMeasurement();
+      if(frameDownSize == 1 && frameDown[0] == 0) {
+        scd4x.setAutomaticSelfCalibrationEnabled((uint16_t)frameDown[0]);
+      } else
+      if(frameDownSize == 3 && frameDown[0] == 1) {
+        scd4x.setAutomaticSelfCalibrationEnabled((uint16_t)frameDown[0]);
+        scd4x.setAutomaticSelfCalibrationTarget((uint16_t)(400 + frameDown[1]));
+        scd4x.setAutomaticSelfCalibrationStandardPeriod((uint16_t)frameDown[2]);
+      } else {
         return;
       }
-      scd4x.stopPeriodicMeasurement();
-      scd4x.setAutomaticSelfCalibrationEnabled((uint16_t)frameDown[0]);
-      scd4x.setAutomaticSelfCalibrationTarget((uint16_t)(400 + frameDown[1]));
-      scd4x.setAutomaticSelfCalibrationStandardPeriod((uint16_t)frameDown[2]);
       scd4x.persistSettings();
     } break;
     case 3: {
