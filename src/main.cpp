@@ -579,6 +579,10 @@ int execCommand(String &command) {
     uint64_t chipId = ESP.getEfuseMac();
     Serial.printf("%04X",(uint16_t)(chipId>>32)); // print first two bytes
     Serial.printf("%08X\r\n",(uint32_t)chipId);   // print lower four bytes
+  } else
+  if (key == "dip") {
+    VextOn();
+    readDip();
   }
   else {
     return commandError;
@@ -1066,6 +1070,7 @@ void loop() {
 
         // if that failed, try once more at SF12
         if(!node.isActivated()) {
+          delay(1000);
           lwActivate(0);
         }
 
