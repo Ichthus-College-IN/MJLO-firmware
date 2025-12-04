@@ -724,6 +724,10 @@ void display_eink() {
     epdDisplay.setCursor(49, 141);
     epdDisplay.printf("%4.1f", pm2_5);
 
+    epdDisplay.setTextSize(1);
+    epdDisplay.setCursor(42, 228);
+    epdDisplay.printf(MJLO_VERSION);
+
     int width = map((int)battMillivolts, 2850, 4050, 0, 104);
     width = max(0, min(104, width));
     epdDisplay.drawRoundRect(7, 240, 106, 11, 2, GxEPD_BLACK);
