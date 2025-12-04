@@ -167,7 +167,7 @@ void writeUplinkToLog() {
   uint32_t dev32 = (cfg.actvn.otaa.devEUI >> 32);
   snprintf(&line[ 9], 9, "%08X", dev32);
   snprintf(&line[17],10, "%08X,", (uint32_t)cfg.actvn.otaa.devEUI);
-  snprintf(&line[26], 3, "% 2d,", fPort);
+  snprintf(&line[26], 3, "% 3d,", fPort);
   for(int i = 0; i < frameUpSize; i++) {
     snprintf(&line[29+i*2], 3, "%02X", frameUp[i]);
   }
@@ -175,7 +175,7 @@ void writeUplinkToLog() {
   File file = LittleFS.open("/" + String(dateBuf) + ".csv", "a");
   file.println(line);
   file.close();
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 28);
+  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 29);
   RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(frameUp, frameUpSize);
 }
 
@@ -886,8 +886,42 @@ void setup() {
   }
   loadConfig();
 
-  // start radio
+  // initialize SPI for radio and SD card
   spiSX.begin(SXSD_SCK, SXSD_MISO, SXSD_MOSI, SX_CS);              // SCK/CLK, MISO, MOSI, NSS/CS
+
+  if(SD.begin(SD_CS, spiSX)) {
+    Serial.println("SD card mounted.");
+    // check if SD card is really present & writable
+    uint64_t cardSize = SD.cardSize() / (1024ULL * 1024ULL);
+    Serial.printf("SD Card Size: %llu MB\n", cardSize);
+
+    // copy everything from root "/" to SD root "/MJLO-xxx"
+    const String LFSSource = "/";
+    const String SDestination = "/" + cfg.wl2g4.name;
+
+    Serial.printf("Starting recursive copy from '%s' to SD '%s'\n",
+                  LFSSource.c_str(), SDestination.c_str());
+
+    if (copyDirRecursive(LittleFS, LFSSource, SD, SDestination)) {
+      Serial.println("All files copied successfully.");
+    } else {
+      Serial.println("Errors occurred during copy.");
+    }
+
+    SD.end();
+
+    Serial.println("Copy complete.");
+
+    for(int i = 0; i < 20; i++) {
+      digitalWrite(LED_B, HIGH);
+      delay(50);
+      digitalWrite(LED_B, LOW);
+      delay(100);
+    }
+  } else {
+    Serial.println("No SD card.");
+  }
+
   radio.begin();                          // initialize SX1262 with default settings
 
   VextOn();
@@ -948,40 +982,6 @@ void setup() {
 
   PRINTF("Starting filesystem...\r\n");
   if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
-
-  if (SD.begin(SD_CS, spiSX)) {
-    Serial.println("SD card mounted.");
-    // 3) Check if SD card is really present & writable
-    uint64_t cardSize = SD.cardSize() / (1024ULL * 1024ULL);
-    Serial.printf("SD Card Size: %llu MB\n", cardSize);
-
-    // 4) Copy everything from LittleFS root "/" → SD root "/MJLO-xxx"
-    //    Adjust destination folder on SD as you see fit.
-    const String LFSSource = "/";
-    const String SDestination = "/" + cfg.wl2g4.name;
-
-    Serial.printf("Starting recursive copy from LittleFS '%s' to SD '%s'\n",
-                  LFSSource.c_str(), SDestination.c_str());
-
-    if (copyDirRecursive(LittleFS, LFSSource, SD, SDestination)) {
-      Serial.println("All files copied successfully.");
-    } else {
-      Serial.println("Errors occurred during copy.");
-    }
-
-    SD.end();
-
-    Serial.println("==== Copy Complete ====");
-
-    for(int i = 0; i < 20; i++) {
-      digitalWrite(LED_B, HIGH);
-      delay(50);
-      digitalWrite(LED_B, LOW);
-      delay(100);
-    }
-  } else {
-    Serial.println("No SD card.");
-  }
 
   // start the state machine
   if(!node.isActivated()) {
