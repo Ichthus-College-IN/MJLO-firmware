@@ -167,9 +167,9 @@ void writeUplinkToLog() {
   uint32_t dev32 = (cfg.actvn.otaa.devEUI >> 32);
   snprintf(&line[ 9], 9, "%08X", dev32);
   snprintf(&line[17],10, "%08X,", (uint32_t)cfg.actvn.otaa.devEUI);
-  snprintf(&line[26], 3, "%d,", fPort);
+  snprintf(&line[26], 3, "% 2d,", fPort);
   for(int i = 0; i < frameUpSize; i++) {
-    snprintf(&line[28+i*2], 3, "%02X", frameUp[i]);
+    snprintf(&line[29+i*2], 3, "%02X", frameUp[i]);
   }
   Serial.printf("[%s] %s\n", dateBuf, line);
   File file = LittleFS.open("/" + String(dateBuf) + ".csv", "a");
