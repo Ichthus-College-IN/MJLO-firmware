@@ -886,9 +886,11 @@ void setup() {
   }
   loadConfig();
 
+  PRINTF("Starting filesystem...\r\n");
+  if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
+
   // initialize SPI for radio and SD card
   spiSX.begin(SXSD_SCK, SXSD_MISO, SXSD_MOSI, SX_CS);              // SCK/CLK, MISO, MOSI, NSS/CS
-
   if(SD.begin(SD_CS, spiSX)) {
     Serial.println("SD card mounted.");
     // check if SD card is really present & writable
@@ -979,9 +981,6 @@ void setup() {
   pinMode(ACC_INT, INPUT);
   attachInterrupt(KEY, onKeyPress, FALLING);        // action button
   attachInterrupt(ACC_INT, onMotion, RISING);       // accelerometer
-
-  PRINTF("Starting filesystem...\r\n");
-  if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
 
   // start the state machine
   if(!node.isActivated()) {
