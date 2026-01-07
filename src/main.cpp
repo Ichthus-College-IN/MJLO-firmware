@@ -297,7 +297,20 @@ void parseDownlink() {
       scd4x.persistSettings();
     } break;
     case 3: {
-
+      // Downlink format (port 3): timezone and DST
+      // payload: int16_t timezoneMinutes (LE), int16_t dstMinutes (LE)
+      if(frameDownSize >= 4) {
+        int16_t tz = (int16_t)(frameDown[0] | (frameDown[1] << 8));
+        int16_t dst = (int16_t)(frameDown[2] | (frameDown[3] << 8));
+        // apply via existing setter to validate and persist
+        String k1 = "timezone";
+        String v1 = String((int)tz);
+        doSetting(k1, v1);
+        String k2 = "dst";
+        String v2 = String((int)dst);
+        doSetting(k2, v2);
+        Serial.printf("[Downlink] timezone set to %d minutes, dst %d minutes\r\n", tz, dst);
+      }
     } break;
     default: {
     } break;
@@ -671,9 +684,21 @@ void display_value(float val, String unit, int16_t x, int16_t y) {
 }
 
 void display_eink() {
+  // display system time in DD-MM-YYYY HH:MM:SS using configured timezone + DST
+  time_t now = time(NULL);
+  time_t adj = now + (cfg.timezoneMinutes + cfg.dstOffsetMinutes) * 60;
+  struct tm *tm_adj;
+  char sysTimeStr[20] = "00-00-0000 00:00:00";
+  tm_adj = gmtime(&adj);
+  if (tm_adj) {
+    snprintf(sysTimeStr, sizeof(sysTimeStr), "%02d-%02d-%04d %02d:%02d:%02d",
+             tm_adj->tm_mday, tm_adj->tm_mon + 1, tm_adj->tm_year + 1900,
+             tm_adj->tm_hour, tm_adj->tm_min, tm_adj->tm_sec);
+  }
+  
   Serial.println("Drawing values");
   Serial.println(millis());
-
+  
   epdDisplay.setRotation(0);
   epdDisplay.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
   epdDisplay.setFont(0);
@@ -683,50 +708,54 @@ void display_eink() {
   do
   {
     // epdDisplay.fillScreen(GxEPD_WHITE);
+    epdDisplay.setTextSize(1);
+    epdDisplay.setCursor(78, 0);
+    epdDisplay.printf(MJLO_VERSION);
+    epdDisplay.drawFastHLine(76, 9, 44, GxEPD_BLACK);
 
     epdDisplay.setTextSize(1);
-    epdDisplay.setCursor(81, 1 + 3);
+    epdDisplay.setCursor(81, 8 + 4);
     epdDisplay.printf("Temp");
-    epdDisplay.setCursor(81, 1 + 13);
+    epdDisplay.setCursor(81, 8 + 14);
     epdDisplay.printf("*C");
-    epdDisplay.setCursor(13, 29 + 3);
+    epdDisplay.setCursor(13, 36 + 4);
     epdDisplay.printf("Vocht");
-    epdDisplay.setCursor(37, 29 + 13);
+    epdDisplay.setCursor(37, 36 + 14);
     epdDisplay.printf("%%");
-    epdDisplay.setCursor(81, 57 + 3);
+    epdDisplay.setCursor(81, 64 + 4);
     epdDisplay.printf("Druk");
-    epdDisplay.setCursor(81, 57 + 13);
+    epdDisplay.setCursor(81, 64 + 14);
     epdDisplay.printf("hPa");
-    epdDisplay.setCursor(25, 85 + 3);
+    epdDisplay.setCursor(25, 92 + 4);
     epdDisplay.printf("CO2");
-    epdDisplay.setCursor(25, 85 + 13);
+    epdDisplay.setCursor(25, 92 + 14);
     epdDisplay.printf("ppm");
-    epdDisplay.setCursor(81, 113 + 3);
+    epdDisplay.setCursor(81, 120 + 4);
     epdDisplay.printf("Geluid");
-    epdDisplay.setCursor(81, 113 + 13);
+    epdDisplay.setCursor(81, 120 + 14);
     epdDisplay.printf("dB(A)");
-    epdDisplay.setCursor(13, 141 + 3);
+    epdDisplay.setCursor(13, 148 + 4);
     epdDisplay.printf("PM2.5");
-    epdDisplay.setCursor(25, 141 + 13);
+    epdDisplay.setCursor(25, 148 + 14);
     epdDisplay.printf("ppm");
 
     epdDisplay.setTextSize(3);
-    epdDisplay.setCursor(1, 1);
+    epdDisplay.setCursor(1, 8);
     epdDisplay.printf("%4.1f", temp);
-    epdDisplay.setCursor(49, 29);
+    epdDisplay.setCursor(49, 36);
     epdDisplay.printf("%4.1f", humi);
-    epdDisplay.setCursor(1, 57);
+    epdDisplay.setCursor(1, 64);
     epdDisplay.printf("%4.0f", pres);
-    epdDisplay.setCursor(49, 85);
+    epdDisplay.setCursor(49, 92);
     epdDisplay.printf("%4d", co2);
-    epdDisplay.setCursor(1, 113);
+    epdDisplay.setCursor(1, 120);
     epdDisplay.printf("%4.1f", db_avg);
-    epdDisplay.setCursor(49, 141);
+    epdDisplay.setCursor(49, 148);
     epdDisplay.printf("%4.1f", pm2_5);
 
     epdDisplay.setTextSize(1);
-    epdDisplay.setCursor(42, 228);
-    epdDisplay.printf(MJLO_VERSION);
+    epdDisplay.setCursor(3, 228);
+    epdDisplay.printf("%s", sysTimeStr);
 
     int width = map((int)battMillivolts, 2850, 4050, 0, 104);
     width = max(0, min(104, width));
