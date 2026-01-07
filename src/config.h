@@ -111,6 +111,8 @@ struct Config {
   CfgInterval interval;
   CfgOperation operation;
   Cfg2G4 wl2g4;
+  int16_t timezoneMinutes = 0; // minutes offset from UTC (e.g. +60)
+  int16_t dstOffsetMinutes = 0; // summer time offset in minutes (usually 60 or 0)
 };
 
 extern Config cfg;
@@ -124,10 +126,11 @@ enum SettingIndices {
           cfgDevEUI, cfgJoinEUI, cfgAppKey, cfgNwkKey, 
           cfgDevAddr, cfgAppSKey, cfgNwkSEncKey, cfgFNwkSIntKey, cfgSNwkSIntKey, 
           cfgDevName, cfgWiFiSSID, cfgWiFiPass, cfgWiFiUser, 
+          cfgTimezone, cfgDST,
           NUM_SETTINGS
           };
 
-enum SettingGroups { gLW, gUp, gOTAA, gABP, g2G4, NUM_GROUPS };
+enum SettingGroups { gLW, gUp, gOTAA, gABP, g2G4, gTime, NUM_GROUPS };
 
 struct setting_t {
   String pretty;
@@ -181,6 +184,8 @@ int setName(String val);
 int setSSID(String val);
 int setPass(String val);
 int setUser(String val);
+int setTimezone(String val);
+int setDST(String val);
 
 void loadConfig();
 String printConfig(int group);

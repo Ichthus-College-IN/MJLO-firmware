@@ -50,7 +50,10 @@ setting_t Settings[NUM_SETTINGS] = {
   { "Name",         "name",         g2G4,   "LRF-1", setName },
   { "SSID",         "ssid",         g2G4,   "LoRangeFinder-1", setSSID },
   { "Pass",         "pass",         g2G4,   "L0R4ngeF1nder", setPass },
-  { "User",         "user",         g2G4,   "",      setUser }
+  { "User",         "user",         g2G4,   "",      setUser },
+
+  { "Timezone",     "timezone",     gTime,  "60",    setTimezone },
+  { "DST",          "dst",          gTime,  "0",     setDST }
 };
 
 void saveParameter(String key, String value) {
@@ -470,6 +473,43 @@ int setUser(String val) {
     return valueError;
   cfg.wl2g4.user = val;
 
+  return(noError);
+}
+
+int setTimezone(String val) {
+  val.trim();
+  if(val.length() == 0) return valueError;
+
+  int minutes = 0;
+  if (val.indexOf(":") >= 0) {
+    // format HH:MM or -HH:MM
+    int colon = val.indexOf(":");
+    int hours = val.substring(0, colon).toInt();
+    int mins = val.substring(colon+1).toInt();
+    if (hours < 0 || val.startsWith("-")) mins = -abs(mins);
+    minutes = hours * 60 + mins;
+  } else {
+    int v = val.toInt();
+    // if user provided a small value assume hours
+    if (abs(v) <= 14) minutes = v * 60;
+    else minutes = v; // assume minutes
+  }
+
+  if (minutes < -720 || minutes > 840) // -12:00 .. +14:00
+    return valueError;
+
+  cfg.timezoneMinutes = minutes;
+  return(noError);
+}
+
+int setDST(String val) {
+  val.trim();
+  if(val.length() == 0) return valueError;
+  int v = val.toInt();
+  // accept hours (0/1) or minutes (0/60)
+  if (abs(v) <= 12) v = v * 60;
+  if (v < 0 || v > 720) return valueError;
+  cfg.dstOffsetMinutes = v;
   return(noError);
 }
 
