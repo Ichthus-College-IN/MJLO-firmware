@@ -27,10 +27,10 @@
 #include "measurement.h"
 #include "fs_browser.h"
 #include "serial.h"
+#include "display.h"
 
 #include <SD.h>
 
-SPIClass spiST(HSPI);
 Adafruit_TSL2591 tsl = Adafruit_TSL2591();
 Adafruit_VEML6070 veml = Adafruit_VEML6070();
 Adafruit_BME680 bme = Adafruit_BME680(&Wire);
@@ -82,8 +82,7 @@ enum DeviceStates {
 };
 
 DeviceStates deviceState = JOIN;
-
-uint32_t tNow = 0;
+DeviceStates prevDeviceState = deviceState;
 
 // WiFi and webserver stuff
 bool serverRunning = false;
@@ -110,18 +109,18 @@ RTC_DATA_ATTR uint8_t gpsBuf[sizeof(TinyGPSPlus)] = { 0 };
 void onKeyPress();
 void onKeyRelease();
 
-void IRAM_ATTR onKeyPress() {
+IRAM_ATTR void onKeyPress() {
   buttonPressed = true;
-  // attachInterrupt(KEY, onKeyRelease, RISING);       // action button
+  attachInterrupt(KEY, onKeyRelease, RISING);       // action button
 }
 
-void IRAM_ATTR onKeyRelease() {
+IRAM_ATTR void onKeyRelease() {
   buttonReleased = true;
-  // attachInterrupt(KEY, onKeyPress, FALLING);        // action button
+  attachInterrupt(KEY, onKeyPress, FALLING);        // action button
 }
 
-void IRAM_ATTR onMotion() {
-  detachInterrupt(5);
+IRAM_ATTR void onMotion() {
+  detachInterrupt(ACC_INT);
   if(isMotion) {
     return;
   }
@@ -854,12 +853,58 @@ bool copyDirRecursive(fs::FS &fsSrc, const String &srcPath, fs::FS &fsDst, const
   return true;
 }
 
+void handleActionButton() {
+  // if this is called when the button isn't released yet,
+  // cycle to the next display style and move the button start time forward
+  if(!buttonReleased) {
+    styleNum += 1;
+    styleNum %= NUM_STYLES;
+    setDisplayStyle(displayStyles[styleNum], true);
+    startPress = millis();
+
+    // mark that this button press was used to switch display styles
+    buttonSwitched = true;
+    return;
+  }
+
+  // if this button press was used to switch display styles, ignore it
+  if(buttonSwitched) {
+    buttonSwitched = false;
+    return;
+  }
+
+  // small debounce period to prevent false double-presses
+  if(startPress - lastPress < 20) {
+    return;
+  }
+  lastPress = millis();
+
+  // small false key press detection
+  if(endPress - startPress < 20) {
+    return;
+  }
+
+  // if no menu is open, open the menu
+  if(deviceState != MENU) {
+    prevDeviceState = deviceState;
+    deviceState = MENU;
+    selectMenu(MENU_MAIN);
+
+    setDisplayStyle(menu, true);
+  } else 
+  // if menu is open, cycle through the available options
+  if(deviceState == MENU) {
+    menu->next();
+  }
+  
+}
+
 void setup() {
   pinMode(BAT_ADC, INPUT);
   pinMode(BAT_CTRL, INPUT_PULLUP);
   pinMode(POWER, INPUT);
   pinMode(LED_B, OUTPUT);
-  pinMode(EPD_BUSY, INPUT);  // TFT_BL
+  pinMode(TFT_BL, OUTPUT);
   pinMode(EPD_CS, OUTPUT);
   pinMode(DIP1, INPUT_PULLUP);
   pinMode(DIP2, INPUT_PULLUP);
@@ -961,27 +1006,36 @@ void setup() {
 
   VextOn();
 
-  spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI);            // SCK/CLK, MISO, MOSI, NSS/CS
+  spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, TFT_CS);            // SCK/CLK, MISO, MOSI, NSS/CS
+  epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  epdDisplay.init(115200, true, 2, false);
+
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
+  st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
+  st7735.setRotation(2);
+  setDisplayStyle(displayStyles[styleNum], false);
+  displayStyle->displayFull();
+  loadMenus();
 
   // restore LoRaWAN session or join if needed
   if(lwBegin()) {
     (void)lwRestore();
     // restore or else try joining at configured datarate
     lwActivate(cfg.uplink.dr);
+    displayStyle->displayFull();
 
     // if join failed, try joining at SF12
     if(!node.isActivated()) {
       delay(1000);
       lwActivate(0);
+      displayStyle->displayFull();
     }
   } else {
     Serial.println("No credentials - going into input mode:");
   }
 
   Wire.begin(SDA0, SCL0);
-
-  epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  epdDisplay.init(115200, true, 2, false);
 
   // housekeeping stuff on fresh boot
   if(wakeup_reason < ESP_SLEEP_WAKEUP_EXT0) {
@@ -1057,6 +1111,22 @@ void loop() {
   delay(10);
   tNow = time(NULL);
 
+  // as action button depends on timing, handle first
+  if(buttonPressed) {
+    startPress = millis();
+    buttonPressed = false;
+    buttonActive = true;
+  }
+  if(buttonActive && deviceState != MENU && millis() - startPress > displayTimout) {
+    handleActionButton();
+  }
+  if(buttonReleased) {
+    endPress = millis();
+    handleActionButton();
+    buttonActive = false;
+    buttonReleased = false;
+  }
+
   battMillivolts = analogReadMilliVolts(BAT_ADC) * 4.9f;
   powerState = digitalRead(POWER) == HIGH;
   usbState = usb_serial_jtag_is_connected();
@@ -1099,11 +1169,13 @@ void loop() {
         
         // try joining at configured datarate
         lwActivate(cfg.uplink.dr);
+        displayStyle->displayFull();
 
         // if that failed, try once more at SF12
         if(!node.isActivated()) {
           delay(1000);
           lwActivate(0);
+          displayStyle->displayFull();
         }
 
         tNow = time(NULL);  // update tNow as lwActivate() is blocking
@@ -1139,6 +1211,11 @@ void loop() {
       break;
     }
     case(WAIT_SATELLITE): {
+      if(tNow > lastDisplayUpdate) {
+        displayStyle->displayLast();
+        displayStyle->displayGNSS();
+        lastDisplayUpdate = tNow;
+      }
       if(gps.satellites.value()) {
         Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
                         gps.time.hour(), gps.time.minute(), gps.time.second());
@@ -1281,6 +1358,11 @@ void loop() {
     }
     case(WAIT_GNSS): {
       // if got a fix for five consecutive seconds, send uplink
+      if(tNow > lastDisplayUpdate) {
+        displayStyle->displayLast();
+        displayStyle->displayGNSS();
+        lastDisplayUpdate = tNow;
+      }
       if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
         Serial1.end();
         Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
@@ -1332,6 +1414,7 @@ void loop() {
       
       wasMotion = isMotion;
       isMotion = false;
+      attachInterrupt(ACC_INT, onMotion, RISING);   // re-attach motion detection
 
       tNow = time(NULL);                      // update tNow as sendUplink() is blocking
 
@@ -1350,9 +1433,13 @@ void loop() {
     }
     case(SHOW_MEAS): {
       
+      digitalWrite(TFT_BL, LOW);
       pinMode(EPD_BUSY, INPUT);
       
       display_eink();
+
+      pinMode(TFT_BL, OUTPUT);
+      digitalWrite(TFT_BL, HIGH);
 
       // motion: read DIP and keep going
       if(wasMotion) {
@@ -1389,6 +1476,21 @@ void loop() {
       
       deviceState = JOIN;
       break;  
+    }
+        case MENU:
+    {
+      // wait for timeout and key release before selecting an item
+      if(!buttonActive && millis() - endPress > displayTimout) {
+        bool close = menu->ifClose(); // whether menu must be closed after execution
+        menu->select();
+
+        if(close) {
+          deviceState = prevDeviceState;
+          setDisplayStyle(displayStyles[styleNum], true);
+          displayStyle->displayFull();
+        }
+      }
+      break;
     }
     default: {
       deviceState = IDLE;

@@ -8,7 +8,6 @@
 #include "gnss.h"
 #include "config.h"
 #include "ble.h"
-#include "pins.h"
 #include "fs_browser.h"
 #include "Display_BMPs.h"
 
@@ -29,7 +28,7 @@
 uint32_t displayTimout = 2500;
 
 SPIClass spiST(HSPI);
-Adafruit_ST7735 st7735 = Adafruit_ST7735(&spiST, TFT_CS, TFTEPD_DC, TFTEPD_RST);
+Adafruit_ST7735 st7735 = Adafruit_ST7735(&spiST, 38, 40, 39);
 uint32_t lastDisplayUpdate = 0;
 
 double oldLat = -1, oldLng = -1, oldAlt = -1, oldHdop = -1;
@@ -47,6 +46,7 @@ enum DisplaySymbols {
 enum DisplayStyles {
   DISPLAY_COMPACT,
   DISPLAY_LORAWAN,
+  DISPLAY_SIGNAL,
   DISPLAY_GNSS,
   DISPLAY_2_4G,
   NUM_STYLES,
@@ -160,13 +160,13 @@ class DisplayStyle {
 
     virtual void displayLoRaWAN() {}
     virtual void displayLast() {}
-    virtual void displayGPS(bool force = false) {}
+    virtual void displayGNSS(bool force = false) {}
     virtual void displayWiFi() {}
     virtual void displayWake() {}
     virtual void displayFull() {}
 };
 
-class DisplayCondensed : public DisplayStyle {
+class DisplayCompact : public DisplayStyle {
   public:
     virtual int getStyleNum() const { return DISPLAY_COMPACT; }
 
@@ -176,7 +176,7 @@ class DisplayCondensed : public DisplayStyle {
       this->displayHeader();
       this->displayLoRaWAN();
       this->displayLast();
-      this->displayGPS(true);
+      this->displayGNSS(true);
       this->displayBattery();
     }
     
@@ -232,7 +232,7 @@ class DisplayCondensed : public DisplayStyle {
       st7735.printf("%6d s", nextUplink - time(NULL) + 1);
     }
 
-    void displayGPS(bool force = false) override {
+    void displayGNSS(bool force = false) override {
       st7735.setTextSize(1);
       st7735.setTextColor(ST7735_WHITE, ST7735_BLACK);
       PRINTST7735(32,  96, force, "%8.04f", oldLat, gps.location.lat);
@@ -399,7 +399,7 @@ class DisplayLoRaWAN : public DisplayStyle {
     }
 };
 
-class DisplayGPS : public DisplayStyle {
+class DisplayGNSS : public DisplayStyle {
   public:
     virtual int getStyleNum() const { return DISPLAY_GNSS; }
 
@@ -407,11 +407,11 @@ class DisplayGPS : public DisplayStyle {
       st7735.fillScreen(ST7735_BLACK);
       st7735.drawBitmap(0, 0, Display_GPS, 80, 160, ST7735_WHITE);
       this->displayHeader();
-      this->displayGPS(true);
+      this->displayGNSS(true);
       this->displayBattery();
     }
 
-    void displayGPS(bool force = false) override {
+    void displayGNSS(bool force = false) override {
       if(gps.time.value()) {
         st7735.drawBitmap(2, 12 + 120, Display_Clock, 16, 16, ST7735_WHITE);
       } else {
@@ -559,6 +559,108 @@ class Display2_4G : public DisplayStyle {
     }
 };
 
+class DisplaySignal : public DisplayStyle {
+  public:
+    virtual int getStyleNum() const { return DISPLAY_SIGNAL; }
+
+    void displayFull() override {
+      st7735.fillScreen(ST7735_BLACK);
+      this->displayHeader();
+      this->displayLast();
+      this->displayLoRaWAN();
+      this->displayBattery();
+    }
+
+    void displayLoRaWAN() override {
+      st7735.setTextSize(3);
+      st7735.setTextColor(ST7735_WHITE, ST7735_BLACK);
+      st7735.drawFastHLine(0, 75, 80, ST7735_WHITE);
+
+      if(!wasDownlink || frameDownSize == 0) {
+        st7735.setCursor(31, 20);
+        st7735.printf("-");
+        st7735.setCursor(31, 47);
+        st7735.printf("-");
+        st7735.setCursor(31, 81);
+        st7735.printf("-");
+        st7735.setCursor(31, 108);
+        st7735.printf("-");
+
+      } else {
+
+        char buffer[10];
+        int16_t x;
+        uint8_t rssiLen, snrLen;
+
+        int rssiUp = -frameDown[3];
+        memset(buffer, 0, 10);
+        sprintf(buffer, "%d", rssiUp);
+        rssiLen = strlen(buffer);
+        x = rssiLen == 3 ? 13 : (rssiLen == 4 ? 4 : -9);
+        st7735.setCursor(x, 20);
+        st7735.printf("%d", rssiUp);
+
+        uint8_t rawSnrUp = frameDown[2];
+        float snrUp = 0;
+        if (rawSnrUp & 0x80) {
+          snrUp = -(rawSnrUp & 0x7F) / 5;
+        } else {
+          snrUp = rawSnrUp / 5;
+        }
+        memset(buffer, 0, 10);
+        sprintf(buffer, "%.1f", snrUp);
+        snrLen = strlen(buffer);
+        x = snrLen == 3 ? 13 : (snrLen == 4 ? 4 : -9);
+        st7735.setCursor(x, 47);
+        st7735.printf("%.1f", snrUp);
+
+
+        memset(buffer, 0, 10);
+        sprintf(buffer, "%.0f", rssi);
+        rssiLen = strlen(buffer);
+        x = rssiLen == 3 ? 13 : (rssiLen == 4 ? 4 : -9);
+        st7735.setCursor(x, 81);
+        st7735.printf("%.0f", rssi);
+
+        memset(buffer, 0, 10);
+        sprintf(buffer, "%.1f", snr);
+        snrLen = strlen(buffer);
+        x = snrLen == 3 ? 13 : (snrLen == 4 ? 4 : -9);
+        st7735.setCursor(x, 108);
+        st7735.printf("%.1f", snr);
+      }
+    }
+
+    void displayLast() override {
+      st7735.setTextSize(2);
+      st7735.setTextColor(ST7735_WHITE, ST7735_BLACK);
+
+      st7735.setCursor(6, 138);
+      st7735.printf("%5ds", nextUplink - time(NULL) + 1);
+    }
+
+    void displayWake() override {
+      st7735.setRotation(3);
+      st7735.fillRect(12, 0, 142, 80, ST7735_BLACK);
+      st7735.setTextColor(ST7735_WHITE, ST7735_BLACK);
+
+      st7735.setTextSize(2);
+      st7735.setCursor(37, 8);
+      st7735.printf("Sleeping");
+
+      st7735.setTextSize(3);
+      uint32_t remaining = nextUplink - time(NULL) + 1;
+      st7735.setCursor(14 + (142 - 18*String(remaining).length()) / 2, 30);
+      st7735.printf("%d", remaining);
+
+      st7735.setTextSize(2);
+      st7735.setCursor(43, 58);
+      st7735.printf("seconds");
+
+      st7735.setRotation(2);
+    }
+};
+
 class DisplayMenu : public DisplayStyle {
   private:
     typedef void (*Callback)(int);
@@ -638,18 +740,19 @@ class DisplayMenu : public DisplayStyle {
     void displayBattery() override {}
     void displayLoRaWAN() override {}
     void displayLast() override {}
-    void displayGPS(bool force = false) override {}
+    void displayGNSS(bool force = false) override {}
     void displayWiFi() override {}
     void displayWake() override {}
 };
 
-DisplayCondensed displayCondensed = DisplayCondensed();
-DisplayLoRaWAN   displayLoRaWAN   = DisplayLoRaWAN();
-DisplayGPS       displayGPS       = DisplayGPS();
-Display2_4G      display2_4G      = Display2_4G();
+DisplayCompact displayCompact = DisplayCompact();
+DisplayLoRaWAN displayLoRaWAN = DisplayLoRaWAN();
+DisplayGNSS    displayGNSS    = DisplayGNSS();
+Display2_4G    display2_4G    = Display2_4G();
+DisplaySignal  displaySignal  = DisplaySignal();
 
-DisplayStyle* displayStyle = &displayCondensed;
-DisplayStyle* displayStyles[NUM_STYLES] = { &displayCondensed, &displayLoRaWAN, &displayGPS, &display2_4G };
+DisplayStyle* displayStyle = &displayGNSS;
+DisplayStyle* displayStyles[NUM_STYLES] = { &displayGNSS, &displayLoRaWAN, &displaySignal, &displayCompact, &display2_4G };
 
 void setDisplayStyle(DisplayStyle* style, bool update = false) {
   displayStyle = style;
@@ -725,7 +828,7 @@ void selectMenu(int val) {
 
 void loadMenus() {
   displayMenus[MENU_MAIN] = new DisplayMenu(80, 160);
-  // displayMenus[MENU_MAIN]->setCallback(0, "Uplink now   ", 0x97D2, true,  uplinkASAP);
+  displayMenus[MENU_MAIN]->setCallback(0, "Uplink now   ", 0x97D2, true,  [](int v){scheduleUplink(0, tNow);});
   displayMenus[MENU_MAIN]->setCallback(1, "Style       >", 0x97D2, false, selectMenu, MENU_STYLE);
   displayMenus[MENU_MAIN]->setCallback(2, "LoRaWAN     >", 0x97D2, false, selectMenu, MENU_LORA);
   displayMenus[MENU_MAIN]->setCallback(3, "Relay       >", 0x97D2, false, selectMenu, MENU_RELAY);
@@ -738,9 +841,10 @@ void loadMenus() {
   displayMenus[MENU_STYLE]->setCallback(0, "Set style",     0xB5F6, false, NULL);
   displayMenus[MENU_STYLE]->setCallback(1, "Compact",       0x97D2, true,  setDisplayStyle, DISPLAY_COMPACT);
   displayMenus[MENU_STYLE]->setCallback(2, "LoRaWAN",       0x97D2, true,  setDisplayStyle, DISPLAY_LORAWAN);
-  displayMenus[MENU_STYLE]->setCallback(3, "GNSS",          0x97D2, true,  setDisplayStyle, DISPLAY_GNSS);
-  displayMenus[MENU_STYLE]->setCallback(4, "2.4G",          0x97D2, true,  setDisplayStyle, DISPLAY_2_4G);
-  displayMenus[MENU_STYLE]->setCallback(5, "- Exit menu -", 0xFB0F, true,  NULL);
+  displayMenus[MENU_STYLE]->setCallback(3, "Signal",        0x97D2, true,  setDisplayStyle, DISPLAY_SIGNAL);
+  displayMenus[MENU_STYLE]->setCallback(4, "GNSS",          0x97D2, true,  setDisplayStyle, DISPLAY_GNSS);
+  displayMenus[MENU_STYLE]->setCallback(5, "2.4G",          0x97D2, true,  setDisplayStyle, DISPLAY_2_4G);
+  displayMenus[MENU_STYLE]->setCallback(6, "- Exit menu -", 0xFB0F, true,  NULL);
 
   displayMenus[MENU_LORA] = new DisplayMenu(80, 160);
   displayMenus[MENU_LORA]->setCallback(0, "Set LoRaWAN",   0xB5F6, false, NULL);
@@ -748,7 +852,7 @@ void loadMenus() {
   displayMenus[MENU_LORA]->setCallback(2, "Tx DR       >", 0x97D2, false, selectMenu, MENU_DR);
   displayMenus[MENU_LORA]->setCallback(3, "Tx dBm      >", 0x97D2, false, selectMenu, MENU_DBM);
   displayMenus[MENU_LORA]->setCallback(4, cfg.uplink.confirmed ? "Confirm (ON)" : "Confirm (OFF)", 0x97D2, true, [](int v){ cfg.uplink.confirmed = !cfg.uplink.confirmed; });
-  // displayMenus[MENU_LORA]->setCallback(5, "Rejoin",        0x97D2, true,  [](int v) { node.clearSession(); uplinkASAP(); });
+  displayMenus[MENU_LORA]->setCallback(5, "Rejoin",        0x97D2, true,  [](int v) { node.clearSession(); scheduleUplink(0, tNow); });
   displayMenus[MENU_LORA]->setCallback(6, "- Exit menu -", 0xFB0F, true,  NULL);
 
   displayMenus[MENU_DR] = new DisplayMenu(80, 160);
