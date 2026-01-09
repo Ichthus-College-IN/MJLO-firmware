@@ -7,6 +7,7 @@
 
 // GPS class
 TinyGPSPlus gps;
+uint32_t tNow = 0;
 
 enum GpsFixLevel {
     GPS_NO_FIX,
