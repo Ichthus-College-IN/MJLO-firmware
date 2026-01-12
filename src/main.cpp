@@ -541,8 +541,8 @@ int execCommand(String &command) {
     Serial.printf("DevAddr: %08X\r\n", node.getDevAddr());
   } else
   if (key == "wipecfg") {
-    for (int i = 0; i < NUM_SETTINGS; i++) {
-      String key = Settings[i].lower;
+    for (uint16_t i = 0; i < NUM_SETTINGS_METADATA; i++) {
+      String key = String(settingsMetadata[i].key);
       String val = "";
       doSetting(key, val);  // set all commands to empty String
     }
@@ -962,6 +962,7 @@ void setup() {
   if(usbState) {
     setupSerial();
   }
+  
   loadConfig();
 
   PRINTF("Starting filesystem...\r\n");

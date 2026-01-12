@@ -4,9 +4,9 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 #include <SPI.h>
+#include "config.h"
 #include "lorawan.h"
 #include "gnss.h"
-#include "config.h"
 #include "ble.h"
 #include "fs_browser.h"
 #include "Display_BMPs.h"

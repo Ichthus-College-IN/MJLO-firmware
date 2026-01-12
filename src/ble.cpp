@@ -69,7 +69,7 @@ void BLEConfigurator::start(String bleName) {
   this->readService  = this->pServer->createService(SERVICE_UUID_MAPQUEST);    // create the BLE Service
   this->ctrlEndpoint = this->readService->createCharacteristic(CHARSTC_UUID_CTRL, BLECharacteristic::PROPERTY_READ);
   this->ctrlEndpoint ->setCallbacks(new BLECallbackRead(*this));
-  for (int i = 0; i < NUM_GROUPS; i++) {
+  for (int i = 0; i < GROUP_COUNT; i++) {
     this->cfgEndpoints[i] = this->readService->createCharacteristic(characteristicUUIDs[i], BLECharacteristic::PROPERTY_READ);
   }
 
@@ -94,7 +94,7 @@ void BLEConfigurator::stop() {
   delete this->readService;
   delete this->txEndpoint;
   delete this->rxEndpoint;
-  for (int i = 0; i < NUM_GROUPS; i++) {
+  for (int i = 0; i < GROUP_COUNT; i++) {
     delete this->cfgEndpoints[i];
   }
   Serial.printf("BLE was deinitialized\r\n");
@@ -104,7 +104,7 @@ void BLEConfigurator::update(int errorCode) {
   String errorString = parseError(errorCode);
   this->rxEndpoint->setValue(errorString.c_str());
 
-  for (int i = 0; i < NUM_GROUPS; i++) {
+  for (int i = 0; i < GROUP_COUNT; i++) {
     String info = printConfig(i);
     this->cfgEndpoints[i]->setValue(info.c_str());
   }

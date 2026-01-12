@@ -6,6 +6,7 @@
 #include <Preferences.h>
 
 #include "helpers.h"
+#include "config_manager.h"
 
 #define PRINTF(format, ...) \
   do { \
@@ -117,94 +118,31 @@ struct Config {
 
 extern Config cfg;
 
-// configuration parsing errors
-enum errorTypes { noError, lengthError, formatError, commandError, keyError, valueError, busyError, NUM_ERRORS };
+// Settings metadata and count (defined in config.cpp)
+extern const SettingMetadata settingsMetadata[];
+extern const uint16_t NUM_SETTINGS_METADATA;
 
-enum SettingIndices {
-          cfgLWVersion, cfgLWMethod, cfgLWRelay, cfgADR, cfgDR, cfgDBm, cfgConfirmed, 
-          cfgInterval, cfgSleep, cfgMode, cfgTimeout,
-          cfgDevEUI, cfgJoinEUI, cfgAppKey, cfgNwkKey, 
-          cfgDevAddr, cfgAppSKey, cfgNwkSEncKey, cfgFNwkSIntKey, cfgSNwkSIntKey, 
-          cfgDevName, cfgWiFiSSID, cfgWiFiPass, cfgWiFiUser, 
-          cfgTimezone, cfgDST,
-          NUM_SETTINGS
-          };
-
-enum SettingGroups { gLW, gUp, gOTAA, gABP, g2G4, gTime, NUM_GROUPS };
-
-struct setting_t {
-  String pretty;
-  String lower;
-  int group;
-  String deflt;
-  int (*set)(String);
-  bool (*mex)() = NULL;
-  String error = "";
-
-  // Constructor to initialize the members
-  setting_t(const String& p, const String& l, const int& i, const String& d, int (*s)(String), 
-        bool (*m)() = NULL, const String& e = "")
-    : pretty(p), lower(l), group(i), deflt(d), set(s), mex(m), error(e) {}
-};
-
-extern setting_t Settings[NUM_SETTINGS];
-
-extern int execCommand(String &command);
-
+// Compatibility wrapper functions for old code
 int doSetting(String &key, String &value);
-
 bool isValidGroupOTAA();
 bool isValidGroupABP();
-
-int setVersion(String val);
-int setMethod(String val);
-int setRelay(String val);
-int setADR(String val);
-int setDatarate(String val);
-int setDBm(String val);
-int setConfirmed(String val);
-
-int setInterval(String val);
-int setSleep(String val);
-int setOperation(String val);
-int setTimeout(String val);
-
-int setDEUI(String val);
-int setJEUI(String val);
-int setAppK(String val);
-int setNwkK(String val);
-
-int setDevA(String val);
-int setAppS(String val);
-int setNwkS(String val);
-int setFNwk(String val);
-int setSNwk(String val);
-
-int setName(String val);
-int setSSID(String val);
-int setPass(String val);
-int setUser(String val);
-int setTimezone(String val);
-int setDST(String val);
-
 void loadConfig();
 String printConfig(int group);
 String printFullConfig(bool inclVersion);
-
 String parseError(int errorCode);
+int execCommand(String &command);
 
+// ============= Helper for parsing ranges =============
 template<typename T>
 uint8_t parseRange(String input, uint8_t size, T* array) {
-  char buffer[input.length() + 1];  // Create a mutable character array
+  char buffer[input.length() + 1];
   input.toCharArray(buffer, sizeof(buffer));
-
-  char *token = strtok(buffer, ","); // Split by comma
+  char *token = strtok(buffer, ",");
   int index = 0;
-
   while (token != nullptr && index < size) {
-    array[index] = (T) atoi(token); // Convert token to int and store in array
+    array[index] = (T) atoi(token);
     index++;
-    token = strtok(nullptr, ","); // Get next token
+    token = strtok(nullptr, ",");
   }
   return(index);
 }
