@@ -706,55 +706,57 @@ void display_eink() {
   epdDisplay.firstPage();
   do
   {
-    // epdDisplay.fillScreen(GxEPD_WHITE);
     epdDisplay.setTextSize(1);
-    epdDisplay.setCursor(78, 0);
-    epdDisplay.printf(MJLO_VERSION);
-    epdDisplay.drawFastHLine(76, 9, 44, GxEPD_BLACK);
-
-    epdDisplay.setTextSize(1);
-    epdDisplay.setCursor(81, 8 + 4);
+    epdDisplay.setCursor(81, 0 + 4);
     epdDisplay.printf("Temp");
-    epdDisplay.setCursor(81, 8 + 14);
+    epdDisplay.setCursor(81, 0 + 14);
     epdDisplay.printf("*C");
-    epdDisplay.setCursor(13, 36 + 4);
+    epdDisplay.setCursor(13, 28 + 4);
     epdDisplay.printf("Vocht");
-    epdDisplay.setCursor(37, 36 + 14);
+    epdDisplay.setCursor(37, 28 + 14);
     epdDisplay.printf("%%");
-    epdDisplay.setCursor(81, 64 + 4);
+    epdDisplay.setCursor(81, 56 + 4);
     epdDisplay.printf("Druk");
-    epdDisplay.setCursor(81, 64 + 14);
+    epdDisplay.setCursor(81, 56 + 14);
     epdDisplay.printf("hPa");
-    epdDisplay.setCursor(25, 92 + 4);
+    epdDisplay.setCursor(25, 84 + 4);
     epdDisplay.printf("CO2");
-    epdDisplay.setCursor(25, 92 + 14);
+    epdDisplay.setCursor(25, 84 + 14);
     epdDisplay.printf("ppm");
-    epdDisplay.setCursor(81, 120 + 4);
+    epdDisplay.setCursor(81, 112 + 4);
     epdDisplay.printf("Geluid");
-    epdDisplay.setCursor(81, 120 + 14);
+    epdDisplay.setCursor(81, 112 + 14);
     epdDisplay.printf("dB(A)");
-    epdDisplay.setCursor(13, 148 + 4);
+    epdDisplay.setCursor(13, 140 + 4);
     epdDisplay.printf("PM2.5");
-    epdDisplay.setCursor(25, 148 + 14);
+    epdDisplay.setCursor(25, 140 + 14);
     epdDisplay.printf("ppm");
 
     epdDisplay.setTextSize(3);
-    epdDisplay.setCursor(1, 8);
+    epdDisplay.setCursor(1, 0);
     epdDisplay.printf("%4.1f", temp);
-    epdDisplay.setCursor(49, 36);
+    epdDisplay.setCursor(49, 28);
     epdDisplay.printf("%4.1f", humi);
-    epdDisplay.setCursor(1, 64);
+    epdDisplay.setCursor(1, 56);
     epdDisplay.printf("%4.0f", pres);
-    epdDisplay.setCursor(49, 92);
+    epdDisplay.setCursor(49, 84);
     epdDisplay.printf("%4d", co2);
-    epdDisplay.setCursor(1, 120);
+    epdDisplay.setCursor(1, 112);
     epdDisplay.printf("%4.1f", db_avg);
-    epdDisplay.setCursor(49, 148);
+    epdDisplay.setCursor(49, 140);
     epdDisplay.printf("%4.1f", pm2_5);
 
+    // draw current time
     epdDisplay.setTextSize(1);
-    epdDisplay.setCursor(3, 228);
+    epdDisplay.setCursor(3, 216);
     epdDisplay.printf("%s", sysTimeStr);
+    epdDisplay.drawFastHLine(0, 226, 120, GxEPD_BLACK);
+
+    // draw device name and firmware version
+    epdDisplay.setCursor(3, 228);
+    epdDisplay.printf("%s", cfg.wl2g4.name.substring(0, 11));
+    epdDisplay.setCursor(78, 228);
+    epdDisplay.printf(MJLO_VERSION);
 
     int width = map((int)battMillivolts, 2850, 4050, 0, 104);
     width = max(0, min(104, width));
