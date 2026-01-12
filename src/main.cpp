@@ -1011,26 +1011,33 @@ void setup() {
   epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
   epdDisplay.init(115200, true, 2, false);
 
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, HIGH);
-  st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
-  st7735.setRotation(2);
-  setDisplayStyle(displayStyles[styleNum], false);
-  displayStyle->displayFull();
-  loadMenus();
+  // in any other case than normal timer wakeup, enable the OLED display
+  if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, HIGH);
+    st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
+    st7735.setRotation(2);
+    setDisplayStyle(displayStyles[styleNum], false);
+    displayStyle->displayFull();
+    loadMenus();
+  }
 
   // restore LoRaWAN session or join if needed
   if(lwBegin()) {
     (void)lwRestore();
     // restore or else try joining at configured datarate
     lwActivate(cfg.uplink.dr);
-    displayStyle->displayFull();
+    if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
+      displayStyle->displayFull();
+    }
 
     // if join failed, try joining at SF12
     if(!node.isActivated()) {
       delay(1000);
       lwActivate(0);
-      displayStyle->displayFull();
+      if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
+        displayStyle->displayFull();
+      }
     }
   } else {
     Serial.println("No credentials - going into input mode:");
@@ -1170,13 +1177,17 @@ void loop() {
         
         // try joining at configured datarate
         lwActivate(cfg.uplink.dr);
-        displayStyle->displayFull();
+        if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
+          displayStyle->displayFull();
+        }
 
         // if that failed, try once more at SF12
         if(!node.isActivated()) {
           delay(1000);
           lwActivate(0);
-          displayStyle->displayFull();
+          if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
+            displayStyle->displayFull();
+          }
         }
 
         tNow = time(NULL);  // update tNow as lwActivate() is blocking
@@ -1212,7 +1223,7 @@ void loop() {
       break;
     }
     case(WAIT_SATELLITE): {
-      if(tNow > lastDisplayUpdate) {
+      if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER && tNow > lastDisplayUpdate) {
         displayStyle->displayLast();
         displayStyle->displayGNSS();
         lastDisplayUpdate = tNow;
@@ -1359,7 +1370,7 @@ void loop() {
     }
     case(WAIT_GNSS): {
       // if got a fix for five consecutive seconds, send uplink
-      if(tNow > lastDisplayUpdate) {
+      if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER && tNow > lastDisplayUpdate) {
         displayStyle->displayLast();
         displayStyle->displayGNSS();
         lastDisplayUpdate = tNow;
@@ -1478,7 +1489,7 @@ void loop() {
       deviceState = JOIN;
       break;  
     }
-        case MENU:
+    case MENU:
     {
       // wait for timeout and key release before selecting an item
       if(!buttonActive && millis() - endPress > displayTimout) {
