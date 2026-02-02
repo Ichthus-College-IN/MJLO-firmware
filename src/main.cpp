@@ -1056,27 +1056,6 @@ void setup() {
     loadMenus();
   }
 
-  // restore LoRaWAN session or join if needed
-  if(lwBegin()) {
-    (void)lwRestore();
-    // restore or else try joining at configured datarate
-    lwActivate(cfg.uplink.dr);
-    if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
-      displayStyle->displayFull();
-    }
-
-    // if join failed, try joining at SF12
-    if(!node.isActivated()) {
-      delay(1000);
-      lwActivate(0);
-      if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
-        displayStyle->displayFull();
-      }
-    }
-  } else {
-    Serial.println("No credentials - going into input mode:");
-  }
-
   Wire.begin(SDA0, SCL0);
 
   // housekeeping stuff on fresh boot
@@ -1110,16 +1089,27 @@ void setup() {
   pinMode(ACC_INT, INPUT);
   attachInterrupt(KEY, onKeyPress, FALLING);        // action button
   attachInterrupt(ACC_INT, onMotion, RISING);       // accelerometer
-
+  
   // start the state machine
-  if(!node.isActivated()) {
+  if(!lwBegin()) {
+    Serial.println("No credentials - going into input mode:");
+    deviceState = IDLE;
+  } else if(lwRestore() != RADIOLIB_ERR_NONE) {
+    Serial.println("No stored session - joining:");
     deviceState = JOIN;
-  } else if (doGNSS) {
-    deviceState = START_GNSS;
   } else {
-    deviceState = START_PM;
+    Serial.println("Restored session - activating:");
+    lwActivate();
+
+    // start measuring
+    if(doGNSS) {
+      deviceState = START_GNSS;
+    } else {
+      deviceState = START_PM;
+    }
   }
 
+  displayStyle->displayFull();
 }
 
 void handleSerialNmea() {
