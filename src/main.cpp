@@ -1022,7 +1022,7 @@ void setup() {
 
     Serial.println("Copy complete.");
 
-    for(int i = 0; i < 20; i++) {
+    for(int i = 0; i < 10; i++) {
       digitalWrite(LED_B, HIGH);
       delay(50);
       digitalWrite(LED_B, LOW);
@@ -1115,12 +1115,16 @@ void setup() {
 void handleSerialNmea() {
   int sec = gps.time.second();
 
+  if(Serial1.available()) {
+    analogWrite(LED_B, 128);
+  }
   while (Serial1.available()) {
     if(printGNSS) {
       Serial.print((char)Serial1.peek());
     }
     gps.encode(Serial1.read());
   }
+  analogWrite(LED_B, 0);
 
   double hdop = gps.hdop.hdop();
   if ((gps.location.age() < 2000) && (hdop <= 2.5) && (hdop > 0)) {
@@ -1134,9 +1138,6 @@ void handleSerialNmea() {
                 (hdop > 0 && hdop < 99) ? GPS_BAD_FIX : 
                                           GPS_NO_FIX;
 
-  digitalWrite(LED_B, HIGH);
-  delay(50);
-  digitalWrite(LED_B, LOW);
 }
 
 void loop() {
