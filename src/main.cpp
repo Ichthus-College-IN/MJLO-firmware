@@ -673,6 +673,33 @@ String to_decimal(float value) {
   return decimalString.substring(pos);
 }
 
+void display_battery() {
+  epdDisplay.setRotation(0);
+  epdDisplay.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
+  epdDisplay.setFont(0);
+
+  epdDisplay.setPartialWindow(0, 228, 120, 10);
+  epdDisplay.firstPage();
+  do
+  {
+    // draw device name and firmware version
+    epdDisplay.setTextSize(1);
+    epdDisplay.setCursor(3, 228);
+    epdDisplay.printf("%s", cfg.wl2g4.name.substring(0, 11));
+    epdDisplay.setCursor(78, 228);
+    epdDisplay.printf(MJLO_VERSION);
+    
+    int width = map((int)battMillivolts, 2850, 4050, 0, 104);
+    width = max(0, min(104, width));
+    epdDisplay.drawRoundRect(7, 240, 106, 11, 2, GxEPD_BLACK);
+    epdDisplay.fillRect(8, 241, width, 9, GxEPD_BLACK);
+    epdDisplay.fillRect(8 + width, 241, 104 - width, 9, GxEPD_WHITE);
+  }
+  while (epdDisplay.nextPage());
+
+  epdDisplay.hibernate();
+}
+
 void display_value(float val, String unit, int16_t x, int16_t y) { 
   epdDisplay.setCursor(x, y);
   epdDisplay.print(int(val));
@@ -1011,7 +1038,12 @@ void setup() {
 
   spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, TFT_CS);            // SCK/CLK, MISO, MOSI, NSS/CS
   epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  epdDisplay.init(115200, true, 2, false);
+  bool fullRefresh = false;
+  if(wakeup_reason < ESP_SLEEP_WAKEUP_EXT0) {
+    fullRefresh = true;
+  }
+  epdDisplay.init(115200, fullRefresh, 2, false);
+  display_battery();
 
   // in any other case than normal timer wakeup, enable the OLED display
   if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
