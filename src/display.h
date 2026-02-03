@@ -8,6 +8,7 @@
 #include "lorawan.h"
 #include "gnss.h"
 #include "ble.h"
+#include "pins.h"
 #include "fs_browser.h"
 #include "Display_BMPs.h"
 
@@ -37,6 +38,8 @@ uint8_t oldH = 0xFF, oldM = 0xFF, oldS = 0xFF;
 
 char devAddrText[15];
 
+void loadMenus();
+
 enum DisplaySymbols {
   SYMBOL_LORAWAN,
   SYMBOL_GPS,
@@ -46,20 +49,43 @@ enum DisplaySymbols {
 enum DisplayStyles {
   DISPLAY_COMPACT,
   DISPLAY_LORAWAN,
-  DISPLAY_SIGNAL,
   DISPLAY_GNSS,
+  DISPLAY_SIGNAL,
   DISPLAY_2_4G,
   NUM_STYLES,
   DISPLAY_MENU  // not user accessible
 };
 
-RTC_DATA_ATTR int styleNum = DISPLAY_COMPACT;
+RTC_DATA_ATTR int styleNum = DISPLAY_GNSS;
 
 class DisplayStyle {
   public:
+    void init() {
+      Serial.println("Active?");
+      if(!this->active) {
+        Serial.println("Activating");
+        pinMode(TFT_BL, OUTPUT);
+        digitalWrite(TFT_BL, HIGH);
+        st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
+        st7735.setRotation(2);
+        loadMenus();
+        this->active = true;
+      }
+      Serial.println("Active");
+    }
+
+    void deinit() {
+      Serial.println("Deactivating");
+      if(this->active) {
+        digitalWrite(TFT_BL, LOW);
+        this->active = false;
+      }
+    }
+
     virtual int getStyleNum() const { return -1; }
 
     virtual void displayHeader(int symbol = 0) {
+      Serial.println("Display Header");
       st7735.setTextSize(1);
 
       // OTAA or ABP icon
@@ -164,6 +190,8 @@ class DisplayStyle {
     virtual void displayWiFi() {}
     virtual void displayWake() {}
     virtual void displayFull() {}
+
+    bool active = false;
 };
 
 class DisplayCompact : public DisplayStyle {
@@ -171,6 +199,7 @@ class DisplayCompact : public DisplayStyle {
     virtual int getStyleNum() const { return DISPLAY_COMPACT; }
 
     void displayFull() override {
+      this->init();
       st7735.fillScreen(ST7735_BLACK);
       st7735.drawBitmap(0, 0, Display_Full, 80, 160, ST7735_WHITE);
       this->displayHeader();
@@ -404,6 +433,7 @@ class DisplayGNSS : public DisplayStyle {
     virtual int getStyleNum() const { return DISPLAY_GNSS; }
 
     void displayFull() override {
+      this->init();
       st7735.fillScreen(ST7735_BLACK);
       st7735.drawBitmap(0, 0, Display_GPS, 80, 160, ST7735_WHITE);
       this->displayHeader();
@@ -460,6 +490,7 @@ class Display2_4G : public DisplayStyle {
     virtual int getStyleNum() const { return DISPLAY_2_4G; }
 
     void displayFull() override {
+      this->init();
       st7735.fillRect(0, 0, 80, 160, ST7735_BLACK);
       st7735.drawBitmap(0, 0, Display_WiFi, 80, 160, ST7735_WHITE);
       this->displayHeader();
@@ -564,6 +595,7 @@ class DisplaySignal : public DisplayStyle {
     virtual int getStyleNum() const { return DISPLAY_SIGNAL; }
 
     void displayFull() override {
+      this->init();
       st7735.fillScreen(ST7735_BLACK);
       this->displayHeader();
       this->displayLast();
@@ -752,7 +784,7 @@ Display2_4G    display2_4G    = Display2_4G();
 DisplaySignal  displaySignal  = DisplaySignal();
 
 DisplayStyle* displayStyle = &displayGNSS;
-DisplayStyle* displayStyles[NUM_STYLES] = { &displayGNSS, &displayLoRaWAN, &displaySignal, &displayCompact, &display2_4G };
+DisplayStyle* displayStyles[NUM_STYLES] = { &displayCompact, &displayLoRaWAN, &displayGNSS, &displaySignal, &display2_4G };
 
 void setDisplayStyle(DisplayStyle* style, bool update = false) {
   displayStyle = style;
