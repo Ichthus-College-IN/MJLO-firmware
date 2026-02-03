@@ -67,9 +67,6 @@ bool lwBegin() {
     }
   }
 
-  // dutycycle is handled by application
-  node.setDutyCycle(false);
-
   return(true);
 }
 
@@ -101,7 +98,7 @@ void lwActivate(uint8_t dr = RADIOLIB_LORAWAN_DATA_RATE_UNUSED) {
   PRINTF("[LoRaWAN] Attempting network join ... ");
 
   radio.standby();
-  
+
   if(dr != RADIOLIB_LORAWAN_DATA_RATE_UNUSED) {
     node.setDatarate(dr);
   }
@@ -111,6 +108,9 @@ void lwActivate(uint8_t dr = RADIOLIB_LORAWAN_DATA_RATE_UNUSED) {
   } else {
     state = node.activateABP();
   }
+
+  // dutycycle is handled by application
+  node.setDutyCycle(false);
 
   radio.sleep();
 
