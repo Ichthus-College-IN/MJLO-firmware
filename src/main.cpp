@@ -678,7 +678,7 @@ void display_battery() {
   epdDisplay.setTextColor(GxEPD_BLACK, GxEPD_WHITE);
   epdDisplay.setFont(0);
 
-  epdDisplay.setPartialWindow(0, 228, 120, 10);
+  epdDisplay.setPartialWindow(0, 228, 120, 22);
   epdDisplay.firstPage();
   do
   {
@@ -1038,22 +1038,9 @@ void setup() {
 
   spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, TFT_CS);            // SCK/CLK, MISO, MOSI, NSS/CS
   epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  bool fullRefresh = false;
+  epdDisplay.init(115200, true, 2, false);
   if(wakeup_reason < ESP_SLEEP_WAKEUP_EXT0) {
-    fullRefresh = true;
-  }
-  epdDisplay.init(115200, fullRefresh, 2, false);
-  display_battery();
-
-  // in any other case than normal timer wakeup, enable the OLED display
-  if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
-    st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
-    st7735.setRotation(2);
-    setDisplayStyle(displayStyles[styleNum], false);
-    displayStyle->displayFull();
-    loadMenus();
+    display_battery();
   }
 
   Wire.begin(SDA0, SCL0);
@@ -1094,9 +1081,11 @@ void setup() {
   if(!lwBegin()) {
     Serial.println("No credentials - going into input mode:");
     deviceState = IDLE;
+
   } else if(lwRestore() != RADIOLIB_ERR_NONE) {
     Serial.println("No stored session - joining:");
     deviceState = JOIN;
+
   } else {
     Serial.println("Restored session - activating:");
     lwActivate();
@@ -1109,7 +1098,13 @@ void setup() {
     }
   }
 
-  displayStyle->displayFull();
+  // if we need to do GNSS, use the OLED display
+  if(deviceState <= START_GNSS) {
+    VextOn();
+    setDisplayStyle(displayStyles[styleNum], true);
+  }
+
+  Serial.println("[Setup complete]");
 }
 
 void handleSerialNmea() {
@@ -1184,12 +1179,13 @@ void loop() {
       if (tNow > nextUplink) {
 
         // test credentials, go idle if incomplete
+        Serial.println("JOIN | begin");
         if(!lwBegin()) {
           deviceState = IDLE;
           return;
         }
         
-        Serial.println("Activating...");
+        Serial.println("JOIN | restore");
         lwRestore(false);
 #if RADIOLIB_LORAWAN_NODE_R          
         if(cfg.relay.enabled) {
@@ -1201,18 +1197,15 @@ void loop() {
         prevUplink = tNow;
         
         // try joining at configured datarate
+        Serial.println("JOIN | activate");
         lwActivate(cfg.uplink.dr);
-        if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
-          displayStyle->displayFull();
-        }
+        displayStyle->displayFull();
 
         // if that failed, try once more at SF12
         if(!node.isActivated()) {
           delay(1000);
           lwActivate(0);
-          if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
-            displayStyle->displayFull();
-          }
+          displayStyle->displayFull();
         }
 
         tNow = time(NULL);  // update tNow as lwActivate() is blocking
@@ -1235,6 +1228,7 @@ void loop() {
     }
     case(START_GNSS): {
       VextOn();
+      displayStyle->displayFull();
       gps = TinyGPSPlus();
 
       // open GPS comms and configure for L1+L5, disabling GSA and GSV
@@ -1248,7 +1242,7 @@ void loop() {
       break;
     }
     case(WAIT_SATELLITE): {
-      if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER && tNow > lastDisplayUpdate) {
+      if(tNow > lastDisplayUpdate) {
         displayStyle->displayLast();
         displayStyle->displayGNSS();
         lastDisplayUpdate = tNow;
@@ -1395,7 +1389,7 @@ void loop() {
     }
     case(WAIT_GNSS): {
       // if got a fix for five consecutive seconds, send uplink
-      if(wakeup_reason != ESP_SLEEP_WAKEUP_TIMER && tNow > lastDisplayUpdate) {
+      if(tNow > lastDisplayUpdate) {
         displayStyle->displayLast();
         displayStyle->displayGNSS();
         lastDisplayUpdate = tNow;
@@ -1470,13 +1464,10 @@ void loop() {
     }
     case(SHOW_MEAS): {
       
-      digitalWrite(TFT_BL, LOW);
+      displayStyle->deinit();
       pinMode(EPD_BUSY, INPUT);
       
       display_eink();
-
-      pinMode(TFT_BL, OUTPUT);
-      digitalWrite(TFT_BL, HIGH);
 
       // motion: read DIP and keep going
       if(wasMotion) {
