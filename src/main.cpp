@@ -1098,8 +1098,8 @@ void setup() {
     }
   }
 
-  // if we need to do GNSS, use the OLED display
-  if(deviceState <= START_GNSS) {
+  // if we need to do GNSS or the device is just powered on, show the OLED display
+  if(deviceState <= START_GNSS || wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
     VextOn();
     setDisplayStyle(displayStyles[styleNum], true);
   }
@@ -1375,8 +1375,13 @@ void loop() {
       // wait for a total of 30 seconds of measurement
       if(tNow - tStart > MEDIUM) {
         (void)sen5x.readMeasuredValues(pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex);
-        digitalWrite(V5_CTRL, LOW);
         Serial.printf("PM2.5: %.2f, PM10: %.2f\n", pm2_5, pm10_);
+
+        // if there was motion, keep the sensor on for improved accuracy
+        // otherwise if there was no motion, power it down already to save energy
+        if(!isMotion) {
+          digitalWrite(V5_CTRL, LOW);
+        }
         
         if(doGNSS) {
           deviceState = WAIT_GNSS;
@@ -1395,7 +1400,6 @@ void loop() {
         lastDisplayUpdate = tNow;
       }
       if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
-        Serial1.end();
         Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
                         gps.time.hour(), gps.time.minute(), gps.time.second());
         Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
@@ -1464,9 +1468,10 @@ void loop() {
     }
     case(SHOW_MEAS): {
       
+      // deinitialize the display backlight as it is used as eink busy input pin
       displayStyle->deinit();
+
       pinMode(EPD_BUSY, INPUT);
-      
       display_eink();
 
       // motion: read DIP and keep going
@@ -1475,8 +1480,17 @@ void loop() {
         Serial.println("Reading DIP registers");
         readDip();
 
-        if(dipGnss) {
+        // if we didn't do GNSS yet, start the module
+        if(!doGNSS && dipGnss) {
           deviceState = START_GNSS;
+          doGNSS = true;
+
+        // if we were already doing GNSS, just go to wait for fix
+        } else if(dipGnss) {
+          displayStyle->displayFull();
+          deviceState = WAIT_SATELLITE;
+
+        // if not doing GNSS, go to PM measurement
         } else {
           deviceState = START_PM;
         }
