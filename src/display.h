@@ -61,9 +61,7 @@ RTC_DATA_ATTR int styleNum = DISPLAY_GNSS;
 class DisplayStyle {
   public:
     void init() {
-      Serial.println("Active?");
       if(!this->active) {
-        Serial.println("Activating");
         pinMode(TFT_BL, OUTPUT);
         digitalWrite(TFT_BL, HIGH);
         st7735.initR(INITR_MINI160x80_PLUGIN);  // initialize ST7735S chip, mini display
@@ -71,11 +69,9 @@ class DisplayStyle {
         loadMenus();
         this->active = true;
       }
-      Serial.println("Active");
     }
 
     void deinit() {
-      Serial.println("Deactivating");
       if(this->active) {
         digitalWrite(TFT_BL, LOW);
         this->active = false;
@@ -85,7 +81,6 @@ class DisplayStyle {
     virtual int getStyleNum() const { return -1; }
 
     virtual void displayHeader(int symbol = 0) {
-      Serial.println("Display Header");
       st7735.setTextSize(1);
 
       // OTAA or ABP icon
