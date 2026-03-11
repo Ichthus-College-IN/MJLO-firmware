@@ -6,6 +6,7 @@ This is a PlatformIO project corresponding to the boxes as used at https://www.m
 1. Connect your sensor box with a USB-A to USB-C cable. Note that USB-C to USB-C cables are unlikely to work, because the microcontroller does not implement any of the required software to handle this.
 1. Put the microcontroller into Download / bootloader mode. To do this, press and hold the USER button, then press and release the RST button while holding USER, and finally let go of the USER button.
 1. From the PlatformIO extension tab, perform "Upload Filesystem Image". This is a necessary step.
+1. Select the `mjlo` environment in the bottom bar and build the project. The first time, this may take a few minutes as it installs the necessary components.
 1. Finally, perform the "Upload" action.
 
 ## How to configure
