@@ -12,7 +12,7 @@
 #include <Adafruit_TSL2591.h>
 #include <Adafruit_VEML6070.h>
 #include <Adafruit_BME680.h>
-#include <SensirionI2CScd4x.h>
+#include <SensirionI2cScd4x.h>
 #include <SensirionI2CSen5x.h>
 
 #include <Adafruit_GFX.h>
