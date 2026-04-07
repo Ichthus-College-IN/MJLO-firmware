@@ -24,3 +24,6 @@ Note that commands and values are case-insensitive, except for values that requi
 
 ## Documentation
 Until proper documentation is created, the "code is the documentation". During development, an effort was made to add comments at crucial and useful places. This will have to do for now, as there has not yet been sufficient priority to improve this.
+
+## Known problems
+See the corresponding file in this repository for known problems and workarounds if available.
