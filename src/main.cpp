@@ -10,8 +10,8 @@
 #include "TinyGPS++.h"
 #include <Adafruit_Sensor.h>
 #include <Adafruit_TSL2591.h>
-#include <Adafruit_VEML6070.h>
-#include <Adafruit_BME680.h>
+#include <Adafruit_AS7331.h>
+#include <Adafruit_BME280.h>
 #include <SensirionI2cScd4x.h>
 #include <SensirionI2CSen5x.h>
 
@@ -31,9 +31,9 @@
 
 #include <SD.h>
 
-Adafruit_TSL2591 tsl = Adafruit_TSL2591();
-Adafruit_VEML6070 veml = Adafruit_VEML6070();
-Adafruit_BME680 bme = Adafruit_BME680(&Wire);
+Adafruit_TSL2591 tsl;
+Adafruit_BME280 bme;
+Adafruit_AS7331 uv;
 SensirionI2cScd4x scd4x;
 SensirionI2CSen5x sen5x;
 SoundSensor mic;
@@ -43,11 +43,10 @@ GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT>
       epdDisplay(GxEPD2_213_GDEY0213B74(EPD_CS, TFTEPD_DC, TFTEPD_RST, EPD_BUSY));
 
 float temp, humi, pres, lumi, db_min, db_avg, db_max;
-float scd_temp, scd_hum;
+float scd_temp, scd_hum, uva, uvb, uvc;
 float pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex;
 uint16_t co2;
-uint32_t uva;
-bool key, doGNSS;
+bool key, doGNSS, sen5xNeedsReset = true;
 uint32_t tStart;
 
 enum dipIntervals {
@@ -178,41 +177,54 @@ void writeUplinkToLog() {
   RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(frameUp, frameUpSize);
 }
 
+// calculate relative humidity for T2 based on T1 and RH1
+// it is only valid at constant absolute humidity - which is the case
+// for two sensors side by side in our box
+// https://sensirion.com/media/documents/A419127A/6836C0D2/Sensirion_AppNotes_Humidity_Sensors_at_a_Glance.pdf
+float convertRH(float RH1, float T1, float T2) {
+  // RH1 = original relative humidity (%)
+  // T1  = original temperature (°C)
+  // T2  = target temperature (°C)
+
+  float exponent = 4283.78 * (T1 - T2) / ((243.12 + T1) * (243.12 + T2));
+  float RH2 = RH1 * exp(exponent);
+
+  // Clamp to physical limits
+  if (RH2 > 100.0) RH2 = 100.0;
+  if (RH2 < 0.0) RH2 = 0.0;
+  return(RH2);
+}
+
 /* Prepares the payload of the frameUp */
 uint8_t prepareTxFrame() {
   uint8_t port = 1;             // default port 1
   if(isMotion) port |= BIT(1);  // set second bit in case of motion
 
-  Serial.printf("Battery: %d mV\r\n", battMillivolts);
+  Serial.printf("Battery: %d mV\n", battMillivolts);
 
   // battery
   frameUp[0] = max(0, min(255, int((battMillivolts - 2500) / 10)));
 
-  // SEN55 temperature and humidity (typically more accurate)
-  uint16_t sTemp = (uint16_t)max(0, min(32767, int(abs(scd_temp) * 100)));
+  // SCD41 temperature and recalculated humidity
+  uint16_t rawTemp = (uint16_t)max(0, min(32767, int(abs(scd_temp) * 100)));
   if (scd_temp < 0)
-    sTemp |= (uint16_t(1) << 15);
-  memcpy(&frameUp[1], &sTemp, 2);
-  frameUp[3] = max(0, min(255, int(scd_hum * 2)));
-
-  // // BME680 temperature and humidity (currently not in use)
-  // uint16_t cTemp = (uint16_t)max(0, min(32767, int(abs(temp) * 100)));
-  // if (temp < 0)
-  //   cTemp |= (uint16_t(1) << 15);
-  // memcpy(&frameUp[1], &cTemp, 2);
-  // frameUp[3] = max(0, min(255, int(humi * 2)));
+    rawTemp |= (uint16_t(1) << 15);
+  memcpy(&frameUp[1], &rawTemp, 2);
+  float recalcHumi = convertRH(humi, temp, scd_temp);
+  Serial.printf("Temp: %.1f, humi: %.1f\n", scd_temp, recalcHumi);
+  frameUp[3] = max(0, min(255, int(recalcHumi * 2)));
 
   // pressure
-  uint16_t pPres = max(0, min(65535, int(pres * 10)));
-  memcpy(&frameUp[4], &pPres, 2);
+  uint16_t rawPres = max(0, min(65535, int(pres * 10)));
+  memcpy(&frameUp[4], &rawPres, 2);
 
   // luminosity
-  uint16_t lLumi = max(0, min(65535, int(lumi)));
-  memcpy(&frameUp[6], &lLumi, 2);
+  uint16_t rawLumi = max(0, min(65535, int(lumi)));
+  memcpy(&frameUp[6], &rawLumi, 2);
 
   // uv(-a)
-  uint16_t nUva = max(0, min(65535, (int)uva));
-  memcpy(&frameUp[8], &uva, 2);
+  uint16_t rawUva = max(0, min(65535, (int)uva));
+  memcpy(&frameUp[8], &rawUva, 2);
 
   // db: min, avg, max
   frameUp[10] = max(0, min(255, int((db_min - 32) * 4)));
@@ -220,15 +232,15 @@ uint8_t prepareTxFrame() {
   frameUp[12] = max(0, min(255, int((db_max - 32) * 4)));
 
   // co2
-  uint16_t mCO2 = (uint16_t)max(0, min(65535, (int)co2));
-  memcpy(&frameUp[13], &mCO2, 2);
+  uint16_t rawCO2 = (uint16_t)max(0, min(65535, (int)co2));
+  memcpy(&frameUp[13], &rawCO2, 2);
 
   // pm2.5, pm10
-  uint16_t mPM25 = max(0, min(4095, int(pm2_5 * 10)));
-  uint16_t mPM10 = max(0, min(4095, int(pm10_ * 10)));
-  frameUp[15] = (uint8_t)mPM25;             // pm2.5 LSB
-  frameUp[16] = (uint8_t)mPM10;             // pm10  LSB
-  frameUp[17] = ((mPM25 >> 8) << 4) | (mPM10 >> 8);   // pm2.5 | pm10 MSB
+  uint16_t rawPM25 = max(0, min(4095, int(pm2_5 * 10)));
+  uint16_t rawPM10 = max(0, min(4095, int(pm10_ * 10)));
+  frameUp[15] = (uint8_t)rawPM25;             // pm2.5 LSB
+  frameUp[16] = (uint8_t)rawPM10;             // pm10  LSB
+  frameUp[17] = ((rawPM25 >> 8) << 4) | (rawPM10 >> 8);   // pm2.5 | pm10 MSB
 
   frameUpSize = 18;
 
@@ -308,7 +320,7 @@ void parseDownlink() {
         String k2 = "dst";
         String v2 = String((int)dst);
         doSetting(k2, v2);
-        Serial.printf("[Downlink] timezone set to %d minutes, dst %d minutes\r\n", tz, dst);
+        Serial.printf("[Downlink] timezone set to %d minutes, dst %d minutes\n", tz, dst);
       }
     } break;
     default: {
@@ -414,7 +426,7 @@ void readDip() {
       break;
   }
 
-  Serial.printf("DIP: %d%d%d, Int: %d, Mode: %d, Gnss: %d, WiFi: %d\r\n", 
+  Serial.printf("DIP: %d%d%d, Int: %d, Mode: %d, Gnss: %d, WiFi: %d\n", 
                 dip1, dip2, dip3, dipInterval, dipMode, dipGnss, dipWifi);
 }
 
@@ -498,7 +510,7 @@ int execCommand(String &command) {
 
   if (key == "at") {
     Serial.print(printFullConfig(true));
-    Serial.printf("\r\n");
+    Serial.printf("\n");
   } else
   if (key == "scan") {
     Serial.println("Scanning for networks...");
@@ -538,7 +550,7 @@ int execCommand(String &command) {
     deviceState = JOIN;
   } else
   if (key == "devaddr") {
-    Serial.printf("DevAddr: %08X\r\n", node.getDevAddr());
+    Serial.printf("DevAddr: %08X\n", node.getDevAddr());
   } else
   if (key == "wipecfg") {
     for (uint16_t i = 0; i < NUM_SETTINGS_METADATA; i++) {
@@ -590,7 +602,7 @@ int execCommand(String &command) {
   if (key == "id") {
     uint64_t chipId = ESP.getEfuseMac();
     Serial.printf("%04X",(uint16_t)(chipId>>32)); // print first two bytes
-    Serial.printf("%08X\r\n",(uint32_t)chipId);   // print lower four bytes
+    Serial.printf("%08X\n",(uint32_t)chipId);   // print lower four bytes
   } else
   if (key == "dip") {
     VextOn();
@@ -1006,7 +1018,7 @@ void setup() {
   
   loadConfig();
 
-  PRINTF("Starting filesystem...\r\n");
+  PRINTF("Starting filesystem...\n");
   if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
 
   // initialize SPI for radio and SD card
@@ -1262,7 +1274,7 @@ void loop() {
       if(gps.satellites.value()) {
         Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
                         gps.time.hour(), gps.time.minute(), gps.time.second());
-        Serial.printf("% 8.5f, % 7.5f | HDOP % 4.1f | % 2d sats\r\n", gps.location.lat(), gps.location.lng(),
+        Serial.printf("% 8.5f, % 7.5f | HDOP % 4.1f | % 2d sats\n", gps.location.lat(), gps.location.lng(),
                         gps.hdop.hdop(), gps.satellites.value());
 
         deviceState = START_PM;
@@ -1271,12 +1283,16 @@ void loop() {
       break;
     }
     case(START_PM): {
-      pinMode(V5_CTRL, OUTPUT);
-      digitalWrite(V5_CTRL, HIGH);
-      delay(75);   // theoretical startup time is 50ms
-      sen5x.begin(Wire);
-      (void)sen5x.deviceReset();
-      (void)sen5x.startMeasurement();
+      // start and reset only once
+      if(sen5xNeedsReset) {
+        pinMode(V5_CTRL, OUTPUT);
+        digitalWrite(V5_CTRL, HIGH);
+        delay(75);   // theoretical startup time is 50ms
+        sen5x.begin(Wire);
+        (void)sen5x.deviceReset();
+        (void)sen5x.startMeasurement();
+        sen5xNeedsReset = false;
+      }
 
       deviceState = START_MIC;
       break; 
@@ -1301,14 +1317,16 @@ void loop() {
     }
     // first read TPH, as the pressure will be used for CO2 calculation
     case(MEAS_TPH): {
-      bme.begin();  // 119, &Wire
-      bme.performReading();
+      bme.begin(118, &Wire);
+      bme.setSampling(Adafruit_BME280::MODE_FORCED);
+      bme.takeForcedMeasurement();
       delay(200);
-      bme.performReading();
-      temp = bme.temperature;
-      humi = bme.humidity;
-      pres = bme.pressure / 100.0f;
-      Serial.printf("Temp: %.2f, humi: %.2f, pres: %.2f\r\n", temp, humi, pres);
+      bme.takeForcedMeasurement();
+      temp = bme.readTemperature();
+      humi = bme.readHumidity();
+      pres = bme.readPressure() / 100.0f;
+      bme.setSampling(Adafruit_BME280::MODE_SLEEP);
+      Serial.printf("Temp: %.2f, humi: %.2f, pres: %.2f\n", temp, humi, pres);
       
       deviceState = START_CO2;
       break;
@@ -1316,7 +1334,7 @@ void loop() {
     case(START_CO2): {
       scd4x.begin(Wire, 0x62);
       // scd4x.wakeUp();
-      scd4x.setAmbientPressure(bme.pressure);
+      scd4x.setAmbientPressure(pres * 100.0f);
       // scd4x.stopPeriodicMeasurement();
       
       // manually call the measureSingleShot() registers as the library does a blocking call
@@ -1334,19 +1352,23 @@ void loop() {
       uint32_t full = tsl.getFullLuminosity();
       lumi = tsl.calculateLux(full & 0xFFFF, full >> 16);
       tsl.disable();
-      Serial.printf("Lumi: %d\r\n", (int)lumi);
+      Serial.printf("Lumi: %d\n", (int)lumi);
       
       deviceState = MEAS_UV;
       break;
     }
     case(MEAS_UV): {
-      Serial.print("UV: ");
-      veml.begin(VEML6070_1_T, &Wire);
-      veml.sleep(false);
-      delay(100);
-      uva = veml.readUV();
-      veml.sleep(true);
-      Serial.println(uva);
+      uv.begin(&Wire);
+      uv.powerDown(true);
+      uv.setGain(AS7331_GAIN_4X);
+      uv.setIntegrationTime(AS7331_TIME_64MS);
+      uv.setMeasurementMode(AS7331_MODE_CMD);
+      uv.powerDown(false);
+      uv.startMeasurement();
+      delay(5 + 1 << AS7331_TIME_64MS);
+      uv.readAllUV_uWcm2(&uva, &uvb, &uvc);
+      uv.powerDown(true);
+      Serial.printf("UV: %d uW/cm2\n", (int)uva);
       
       deviceState = MEAS_CO2;
       break;
@@ -1359,7 +1381,8 @@ void loop() {
       if(co2_ready) {
         scd4x.readMeasurement(co2, scd_temp, scd_hum);
         // scd4x.powerDown();
-        Serial.printf("CO2: %d\r\n", co2);
+        Serial.printf("CO2: %d\n", co2);
+        Serial.printf("Temp: %.2f, humi: %.2f\n", scd_temp, scd_hum);
         
         deviceState = MEAS_MIC;
       }
@@ -1376,7 +1399,7 @@ void loop() {
         db_min = zMeasurement.min;
         db_avg = zMeasurement.avg;
         db_max = zMeasurement.max;
-        Serial.printf("dB: [%.1f | %.1f | %.1f]\r\n", db_min, db_avg, db_max);
+        Serial.printf("dB: [%.1f | %.1f | %.1f]\n", db_min, db_avg, db_max);
 
         deviceState = MEAS_PM;
       }
@@ -1388,11 +1411,13 @@ void loop() {
       if(tNow - tStart > MEDIUM) {
         (void)sen5x.readMeasuredValues(pm1_0, pm2_5, pm4_0, pm10_, hum5x, temp5x, vocIndex, noxIndex);
         Serial.printf("PM2.5: %.2f, PM10: %.2f\n", pm2_5, pm10_);
+        Serial.printf("Temp: %.2f, humi: %.2f\n", temp5x, hum5x);
 
         // if there was motion, keep the sensor on for improved accuracy
         // otherwise if there was no motion, power it down already to save energy
-        if(!isMotion) {
+        if(dipInterval == SLOW && !isMotion) {
           digitalWrite(V5_CTRL, LOW);
+          sen5xNeedsReset = true;
         }
         
         if(doGNSS) {
@@ -1414,7 +1439,7 @@ void loop() {
       if (tNow > nextUplink && gpsFixLevel == GPS_GOOD_FIX) {
         Serial.printf("[%d-%02d-%02d %02d:%02d:%02d] ", gps.date.year(), gps.date.month(), gps.date.day(),
                         gps.time.hour(), gps.time.minute(), gps.time.second());
-        Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\r\n", gps.location.lat(), gps.location.lng(),
+        Serial.printf("% 8.5f, % 7.5f | % 3.2f | % 2d\n", gps.location.lat(), gps.location.lng(),
                         gps.hdop.hdop(), gps.satellites.value());
         
         setSystemTimeFromGPS();
