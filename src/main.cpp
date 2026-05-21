@@ -585,13 +585,18 @@ int execCommand(String &command) {
     ESP.restart();
   } else
   if (key == "accel") {
-    while(Serial.available() < 5) {
-      while(!digitalRead(ACC_INT)) {
-        delay(1);
+    while(true) {
+      while(!digitalRead(ACC_INT) && Serial.available() < 5) {
+        yield();
       }
-      Serial.println("Motion");
-      while(digitalRead(ACC_INT)) {
-        delay(1);
+      if(digitalRead(ACC_INT)) {
+        Serial.println("Motion");
+        isMotion = false;
+        while(digitalRead(ACC_INT)) {
+          yield();
+        }
+      } else {
+        break;
       }
     }
     (void)Serial.readString();

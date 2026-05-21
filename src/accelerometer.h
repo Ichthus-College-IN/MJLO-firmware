@@ -1,42 +1,39 @@
 #ifndef _ACCELEROMETER_H
 #define _ACCELEROMETER_H
 
-#include <SparkFun_BMI270_Arduino_Library.h>
+#include <LSM6DSRSensor.h>
 #include <Wire.h>
-#include "config.h"
 
-BMI270 bmi;
+LSM6DSRSensor lsm6dsr(&Wire, LSM6DSR_I2C_ADD_H);
 
 void accelSetup() {
-  bmi.beginI2C(0x68);
+  int status = lsm6dsr.begin();
+  if(status != 0) {
+    Serial.printf("Failed to initalize LSM6DSR: status %d\r\n", status);
+    return;
+  }
+  // 1270 uA default
+  lsm6dsr.Enable_X();
+
+  // 372 uA
+  lsm6dsr.Disable_G();
+
+  // 20 uA
+  lsm6dsr.Set_X_ODR(12.5);
+
+  // 12 uA
+  // lsm6dsr.Disable_X();
 }
 
 void accelAnyMotion() {
-  bmi.enableFeature(BMI2_ANY_MOTION);
-  bmi.mapInterruptToPin(BMI2_ANY_MOTION_INT, BMI2_INT1);
+  lsm6dsr_wkup_ths_weight_set(&(lsm6dsr.reg_ctx), LSM6DSR_LSb_FS_DIV_64);   // FS = 2g
+  lsm6dsr_wkup_threshold_set(&(lsm6dsr.reg_ctx), 0b00001100);               // 12/64 * 2g = 0.375g
+  lsm6dsr_wkup_dur_set(&(lsm6dsr.reg_ctx), 0);
+  lsm6dsr_act_sleep_dur_set(&(lsm6dsr.reg_ctx), 0);
 
-  bmi2_sens_config anyMotionConfig;
-  anyMotionConfig.type = BMI2_ANY_MOTION;
-  anyMotionConfig.cfg.any_motion.duration = 1;
-  anyMotionConfig.cfg.any_motion.threshold = 600;
-  anyMotionConfig.cfg.any_motion.select_x = BMI2_ENABLE;
-  anyMotionConfig.cfg.any_motion.select_y = BMI2_ENABLE;
-  anyMotionConfig.cfg.any_motion.select_z = BMI2_ENABLE;
-  bmi.setConfig(anyMotionConfig);
-  
-  bmi2_int_pin_config intPinConfig;
-  intPinConfig.pin_type = BMI2_INT1;
-  intPinConfig.int_latch = BMI2_INT_NON_LATCH;
-  intPinConfig.pin_cfg[0].lvl = BMI2_INT_ACTIVE_HIGH;
-  intPinConfig.pin_cfg[0].od = BMI2_INT_PUSH_PULL;
-  intPinConfig.pin_cfg[0].output_en = BMI2_INT_OUTPUT_ENABLE;
-  intPinConfig.pin_cfg[0].input_en = BMI2_INT_INPUT_DISABLE;
-  bmi.setInterruptPinConfig(intPinConfig);
-
-  bmi.setAccelPowerMode(BMI2_POWER_OPT_MODE);
-  bmi.disableFeature(BMI2_GYRO);
-  bmi.enableAdvancedPowerSave();
-  bmi.setAccelODR(BMI2_ACC_ODR_12_5HZ);
+  lsm6dsr_pin_int1_route_t int1val;
+  int1val.md1_cfg.int1_wu = PROPERTY_ENABLE;                // enable wake-up source on INT1 pin
+  lsm6dsr_pin_int1_route_set(&(lsm6dsr.reg_ctx), &int1val); // configure the selected wake-up sources on INT1
 }
 
 #endif

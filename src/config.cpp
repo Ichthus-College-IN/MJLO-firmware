@@ -13,7 +13,7 @@ const LoRaWANBand_t *band = &EU868;
 uint32_t nextUplink = 0;
 uint32_t prevUplink = 0;
 uint32_t uplinkOffset = 0;
-bool isMotion = false;
+volatile bool isMotion = false;
 bool wasDownlink = false;
 float rssi;
 float snr;

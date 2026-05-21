@@ -23,7 +23,7 @@ extern const LoRaWANBand_t *band;
 extern RTC_DATA_ATTR uint32_t nextUplink;
 extern RTC_DATA_ATTR uint32_t prevUplink;
 extern RTC_DATA_ATTR uint32_t uplinkOffset;
-extern RTC_DATA_ATTR bool isMotion;
+extern RTC_DATA_ATTR volatile bool isMotion;
 extern RTC_DATA_ATTR bool wasDownlink;
 extern RTC_DATA_ATTR float rssi;
 extern RTC_DATA_ATTR float snr;
