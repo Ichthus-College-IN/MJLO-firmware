@@ -381,11 +381,13 @@ void closeSerial() {
 
 
 void VextOn() {
+  // pinMode(V_EXT, INPUT_PULLUP);
   pinMode(V_EXT, OUTPUT);
-  digitalWrite(V_EXT, HIGH);  // active HIGH
+  digitalWrite(V_EXT, HIGH);
 }
 
 void VextOff() {
+  // pinMode(V_EXT, INPUT_PULLDOWN);
   pinMode(V_EXT, OUTPUT);
   digitalWrite(V_EXT, LOW);
 }
@@ -1108,7 +1110,7 @@ void setup() {
   pinMode(ACC_INT, INPUT);
   attachInterrupt(KEY, onKeyPress, FALLING);        // action button
   attachInterrupt(ACC_INT, onMotion, RISING);       // accelerometer
-  
+
   // start the state machine
   if(!lwBegin()) {
     Serial.println("No credentials - going into input mode:");
@@ -1129,6 +1131,9 @@ void setup() {
       deviceState = START_PM;
     }
   }
+
+  // this print (or maybe a delay?) is needed because otherwise ACC_INT would read and stay HIGH
+  Serial.printf("DeviceState: %d\n", (uint8_t)deviceState); 
 
   // if we need to do GNSS or the device is just powered on, show the OLED display
   if(deviceState <= START_GNSS || wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
@@ -1505,7 +1510,8 @@ void loop() {
       if(dipInterval == SLOW && wasMotion) {
         uplinkOffset = MEDIUM;
       }
-
+      
+      Serial.printf("Next uplink in %d seconds\n", uplinkOffset);
       scheduleUplink(uplinkOffset, prevUplink);
       deviceState = SHOW_MEAS;
 
