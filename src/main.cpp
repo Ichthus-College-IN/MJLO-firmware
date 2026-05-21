@@ -165,16 +165,15 @@ void writeUplinkToLog() {
   uint32_t dev32 = (cfg.actvn.otaa.devEUI >> 32);
   snprintf(&line[ 9], 9, "%08X", dev32);
   snprintf(&line[17],10, "%08X,", (uint32_t)cfg.actvn.otaa.devEUI);
-  snprintf(&line[26], 3, "% 3d,", fPort);
+  snprintf(&line[26], 5, "% 3d,", fPort);
   for(int i = 0; i < frameUpSize; i++) {
-    snprintf(&line[29+i*2], 3, "%02X", frameUp[i]);
+    snprintf(&line[30+i*2], 3, "%02X", frameUp[i]);
   }
   Serial.printf("[%s] %s\n", dateBuf, line);
   File file = LittleFS.open("/" + String(dateBuf) + ".csv", "a");
   file.println(line);
   file.close();
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 29);
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP(frameUp, frameUpSize);
+  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 30 + frameUpSize * 2);
 }
 
 // calculate relative humidity for T2 based on T1 and RH1
@@ -829,21 +828,22 @@ void display_eink() {
 }
 
 static const char *TAG = "FS_COPY";
+
 // -----------------------------------------------------------------------------
 // Helper: recursively copy a directory from LittleFS to SD.
 // -----------------------------------------------------------------------------
-bool copyDirRecursive(fs::FS &fsSrc, const String &srcPath, fs::FS &fsDst, const String &dstPath) {
+bool copyDirRecursive(fs::FS &fsSrc, const char *srcPath, fs::FS &fsDst, const char *dstPath) {
   // Open the source directory
-  File srcDir = fsSrc.open(srcPath.c_str());
+  File srcDir = fsSrc.open(srcPath);
   if (!srcDir || !srcDir.isDirectory()) {
-    Serial.printf("  Failed to open source dir: %s\n", srcPath.c_str());
+    Serial.printf("  Failed to open source dir: %s\n", srcPath);
     return false;
   }
 
   // Ensure destination directory exists (create recursively)
   if (!fsDst.exists(dstPath)) {
     if (!fsDst.mkdir(dstPath)) {
-      Serial.printf("  Failed to create destination dir: %s\n", dstPath.c_str());
+      Serial.printf("  Failed to create destination dir: %s\n", dstPath);
       srcDir.close();
       return false;
     }
@@ -852,27 +852,29 @@ bool copyDirRecursive(fs::FS &fsSrc, const String &srcPath, fs::FS &fsDst, const
   // Iterate through everything inside srcDir
   File entry = srcDir.openNextFile();
   while (entry) {
-    String entryName = entry.name(); // e.g. "/foo.txt" or "/subdir"
-    // Build relative path from srcPath
-    String relPath = entryName.substring(srcPath.length());
-    if (relPath.startsWith("/")) {
-      relPath = relPath.substring(1);
-    }
+    const char *entryName = entry.name(); // e.g. "/dir1/foo.txt"
 
-    String srcFullPath = "/" + entryName;                     // e.g. "/dir1/file.txt"
-    String dstFullPath = dstPath + "/" + relPath;       // e.g. "/backup/dir1/file.txt"
+    // Build relative path by advancing past the srcPath prefix
+    const char *relPath = entryName + strlen(srcPath);
+    if (relPath[0] == '/') relPath++;
+
+    char srcFullPath[256];
+    char dstFullPath[256];
+    snprintf(srcFullPath, sizeof(srcFullPath), "/%s", entryName);    // e.g. "/dir1/file.txt"
+    snprintf(dstFullPath, sizeof(dstFullPath), "%s/%s", dstPath, relPath); // e.g. "/backup/dir1/file.txt"
 
     if (entry.isDirectory()) {
       // Recursively copy sub-directory
-      Serial.printf("  Creating dir: %s\n", dstFullPath.c_str());
+      Serial.printf("  Creating dir: %s\n", dstFullPath);
       copyDirRecursive(fsSrc, srcFullPath, fsDst, dstFullPath);
     } else {
       // It's a file: copy its contents
-      Serial.printf("  Copying file: %s → %s\n", srcFullPath.c_str(), dstFullPath.c_str());
+      Serial.printf("  Copying file: %s → %s\n", srcFullPath, dstFullPath);
+
       // Open source file for reading
       File fSrc = fsSrc.open(srcFullPath, FILE_READ);
       if (!fSrc) {
-        Serial.printf("    Failed to open source file: %s\n", srcFullPath.c_str());
+        Serial.printf("    Failed to open source file: %s\n", srcFullPath);
         entry.close();
         continue;
       }
@@ -885,7 +887,7 @@ bool copyDirRecursive(fs::FS &fsSrc, const String &srcPath, fs::FS &fsDst, const
       // Open destination file for writing (will create it)
       File fDst = fsDst.open(dstFullPath, FILE_WRITE);
       if (!fDst) {
-        Serial.printf("    Failed to open destination file: %s\n", dstFullPath.c_str());
+        Serial.printf("    Failed to open destination file: %s\n", dstFullPath);
         fSrc.close();
         entry.close();
         continue;
@@ -1023,8 +1025,8 @@ void setup() {
   
   loadConfig();
 
-  PRINTF("Starting filesystem...\n");
-  if (!LittleFS.begin())  { PRINTF("Failed to initialize filesystem"); while(1) { delay(10); }; }
+  Serial.printf("Starting filesystem...\n");
+  if (!LittleFS.begin())  { Serial.printf("Failed to initialize filesystem\n"); while(1) { delay(10); }; }
 
   // initialize SPI for radio and SD card
   spiSX.begin(SXSD_SCK, SXSD_MISO, SXSD_MOSI, SX_CS);              // SCK/CLK, MISO, MOSI, NSS/CS
@@ -1035,11 +1037,12 @@ void setup() {
     Serial.printf("SD Card Size: %llu MB\n", cardSize);
 
     // copy everything from root "/" to SD root "/MJLO-xxx"
-    const String LFSSource = "/";
-    const String SDestination = "/" + cfg.wl2g4.name;
+    const char LFSSource[] = "/";
+    char SDestination[256];
+    snprintf(SDestination, sizeof(SDestination), "/%s", cfg.wl2g4.name);
 
     Serial.printf("Starting recursive copy from '%s' to SD '%s'\n",
-                  LFSSource.c_str(), SDestination.c_str());
+                  LFSSource, SDestination);
 
     if (copyDirRecursive(LittleFS, LFSSource, SD, SDestination)) {
       Serial.println("All files copied successfully.");
