@@ -153,27 +153,28 @@ void writeUplinkToLog() {
 
   snprintf(newDateBuf, 11, "%04d-%02d-%02d", 
            timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday);
-  snprintf(timeBuf, 9, "%02d:%02d:%02d", 
-          timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
-
+           
   if (newDateBuf != dateBuf)
     checkAvailableStorage(newDateBuf);
   memcpy(dateBuf, newDateBuf, 11);
 
   char line[128];
-  snprintf(&line[ 0],10, "%s,", timeBuf);
-  uint32_t dev32 = (cfg.actvn.otaa.devEUI >> 32);
-  snprintf(&line[ 9], 9, "%08X", dev32);
-  snprintf(&line[17],10, "%08X,", (uint32_t)cfg.actvn.otaa.devEUI);
-  snprintf(&line[26], 5, "% 3d,", fPort);
-  for(int i = 0; i < frameUpSize; i++) {
-    snprintf(&line[30+i*2], 3, "%02X", frameUp[i]);
+  memset(line, 0, sizeof(line));
+  int pos = 0;
+  pos += snprintf(&line[pos], sizeof(line) - pos, "%04d-%02d-%02d,", timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday);
+  pos += snprintf(&line[pos], sizeof(line) - pos, "%02d:%02d:%02d,", timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
+  pos += snprintf(&line[pos], sizeof(line) - pos, "%016llX,", cfg.actvn.otaa.devEUI);
+  pos += snprintf(&line[pos], sizeof(line) - pos, "% 3d,", fPort);
+  for (int i = 0; i < frameUpSize; i++) {
+    pos += snprintf(&line[pos], sizeof(line) - pos, "%02X", frameUp[i]);
   }
-  Serial.printf("[%s] %s\n", dateBuf, line);
+  pos += snprintf(&line[pos], sizeof(line) - pos, "\n");
+
+  Serial.printf("[%s] %s", dateBuf, line);
   File file = LittleFS.open("/" + String(dateBuf) + ".csv", "a");
-  file.println(line);
+  file.write((uint8_t*)line, pos);
   file.close();
-  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, 30 + frameUpSize * 2);
+  RADIOLIB_DEBUG_PROTOCOL_HEXDUMP((uint8_t*)line, pos);
 }
 
 // calculate relative humidity for T2 based on T1 and RH1
@@ -829,11 +830,7 @@ void display_eink() {
   delay(50);
 }
 
-static const char *TAG = "FS_COPY";
-
-// -----------------------------------------------------------------------------
-// Helper: recursively copy a directory from LittleFS to SD.
-// -----------------------------------------------------------------------------
+// Recursively copy a directory from LittleFS to SD.
 bool copyDirRecursive(fs::FS &fsSrc, const char *srcPath, fs::FS &fsDst, const char *dstPath) {
   // Open the source directory
   File srcDir = fsSrc.open(srcPath);

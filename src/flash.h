@@ -29,7 +29,7 @@ void checkAvailableStorage(const char *dateBuf) {
     file = LittleFS.open(fileBuf, "a");
     if (!file.size()) {
         Serial.printf("Created new file\r\n");
-        file.println("time,dev_eui,f_port,PayloadHex");
+        file.println("date,time,dev_eui,f_port,PayloadHex");
     }
     file.close();
 }
