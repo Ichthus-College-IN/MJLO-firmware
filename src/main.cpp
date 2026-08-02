@@ -10,7 +10,7 @@
 #include "TinyGPS++.h"
 #include <Adafruit_Sensor.h>
 #include <Adafruit_TSL2591.h>
-#include <Adafruit_AS7331.h>
+#include <Adafruit_LTR390.h>
 #include <Adafruit_BME280.h>
 #include <SensirionI2cScd4x.h>
 #include <SensirionI2CSen5x.h>
@@ -33,7 +33,7 @@
 
 Adafruit_TSL2591 tsl;
 Adafruit_BME280 bme;
-Adafruit_AS7331 uv;
+Adafruit_LTR390 uv;
 SensirionI2cScd4x scd4x;
 SensirionI2CSen5x sen5x;
 SoundSensor mic;
@@ -1369,15 +1369,13 @@ void loop() {
     }
     case(MEAS_UV): {
       uv.begin(&Wire);
-      uv.powerDown(true);
-      uv.setGain(AS7331_GAIN_4X);
-      uv.setIntegrationTime(AS7331_TIME_64MS);
-      uv.setMeasurementMode(AS7331_MODE_CMD);
-      uv.powerDown(false);
-      uv.startMeasurement();
-      delay(5 + 1 << AS7331_TIME_64MS);
-      uv.readAllUV_uWcm2(&uva, &uvb, &uvc);
-      uv.powerDown(true);
+      uv.enable(true);
+      uv.setMode(LTR390_MODE_UVS);
+      uv.setGain(LTR390_GAIN_3);
+      uv.setResolution(LTR390_RESOLUTION_18BIT);  // 100ms
+      delay(5 + 200);
+      uva = uv.readUVS();
+      uv.enable(false);
       Serial.printf("UV: %d uW/cm2\n", (int)uva);
       
       deviceState = MEAS_CO2;
