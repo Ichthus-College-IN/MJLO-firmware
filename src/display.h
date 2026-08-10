@@ -9,7 +9,7 @@
 #include "gnss.h"
 #include "ble.h"
 #include "pins.h"
-#include "fs_browser.h"
+#include "webserver.h"
 #include "Display_BMPs.h"
 
 #define PRINTST7735(x, y, force, format, oldVal, newValFunc) \
@@ -836,7 +836,7 @@ void selectMenu(int val) {
     }
     case MENU_CONN: {
       displayMenus[MENU_CONN]->setCallback(1, usbOn ? "USB (ON)" : "USB (OFF)", 0x97D2, true, [](int v){ usbOn = !usbOn; });
-      // displayMenus[MENU_CONN]->setCallback(2, wifiMode ? "WiFi (ON)" : "WiFi (OFF)", 0x97D2, true, wifiEnable);
+      displayMenus[MENU_CONN]->setCallback(2, wifiMode ? "WiFi (ON)" : "WiFi (OFF)", 0x97D2, true, wifiMode == WIFI_MODE_NULL ? wifiEnable : wifiDisable);
       // displayMenus[MENU_CONN]->setCallback(3, ble.state ? "BLE (ON)" : "BLE (OFF)", 0x97D2, true, bleEnable);
       break;
     }
@@ -943,7 +943,7 @@ void loadMenus() {
   displayMenus[MENU_CONN] = new DisplayMenu(80, 160);
   displayMenus[MENU_CONN]->setCallback(0, "Connections",   0xB5F6, false, NULL);
   displayMenus[MENU_CONN]->setCallback(1, usbOn ? "USB (ON)" : "USB (OFF)", 0x97D2, true, [](int v){ usbOn = !usbOn; });
-  // displayMenus[MENU_CONN]->setCallback(2, wifiMode ? "WiFi (ON)" : "WiFi (OFF)", 0x97D2, true, wifiEnable);
+  displayMenus[MENU_CONN]->setCallback(2, wifiMode ? "WiFi (ON)" : "WiFi (OFF)", 0x97D2, true, wifiEnable);
   // displayMenus[MENU_CONN]->setCallback(3, ble.state ? "BLE (ON)" : "BLE (OFF)", 0x97D2, true, bleEnable);
   displayMenus[MENU_CONN]->setCallback(4, "- Exit menu -", 0xFB0F, true,  NULL);
   
@@ -953,7 +953,7 @@ void loadMenus() {
   displayMenus[MENU_ABT]->setCallback(1, devAddrText,        0xB5F6, false, NULL);
   displayMenus[MENU_ABT]->setCallback(2, cfg.wl2g4.name.c_str(), 0xB5F6, false, NULL);
   displayMenus[MENU_ABT]->setCallback(3, "FW " MJLO_VERSION, 0xB5F6, false, NULL);
-  displayMenus[MENU_ABT]->setCallback(4, "    LRF-1    ",    0xB5F6, false, NULL);
+  displayMenus[MENU_ABT]->setCallback(4, "  SensorBox  ",    0xB5F6, false, NULL);
   displayMenus[MENU_ABT]->setCallback(5, "   Kroonos   ",    0xB5F6, false, NULL);
   displayMenus[MENU_ABT]->setCallback(6, "- Exit menu -",    0xFB0F, true,  NULL);
 }

@@ -25,7 +25,7 @@
 #include "accelerometer.h"
 #include "soundsensor.h"
 #include "measurement.h"
-#include "fs_browser.h"
+#include "webserver.h"
 #include "serial.h"
 #include "display.h"
 
@@ -120,6 +120,7 @@ IRAM_ATTR void onKeyRelease() {
 
 IRAM_ATTR void onMotion() {
   detachInterrupt(ACC_INT);
+  webAccelPending = true;   // report every trigger to the web UI, even a repeat
   if(isMotion) {
     return;
   }
@@ -610,6 +611,18 @@ int execCommand(String &command) {
     uint64_t chipId = ESP.getEfuseMac();
     Serial.printf("%04X",(uint16_t)(chipId>>32)); // print first two bytes
     Serial.printf("%08X\n",(uint32_t)chipId);   // print lower four bytes
+
+    // the same identifiers, as the web UI expects them at its login page
+    Serial.printf("Web user: %02X-%02X-%02X-%02X-%02X-%02X\n",
+                  (uint8_t)(chipId >> 40), (uint8_t)(chipId >> 32), (uint8_t)(chipId >> 24),
+                  (uint8_t)(chipId >> 16), (uint8_t)(chipId >>  8), (uint8_t)(chipId));
+    char pw[16];
+    webDefaultPassword(pw, sizeof(pw));
+    Serial.printf("Web pass: %s (default; use +webpass to restore it)\n", pw);
+  } else
+  if (key == "webpass") {
+    webResetPassword();
+    Serial.println("Web password reset to the default device code");
   } else
   if (key == "dip") {
     VextOn();
@@ -625,6 +638,7 @@ int execCommand(String &command) {
 void wifiEnable(int val) {
   (void)val;
 
+  setCpuFrequencyMhz(240);  // the async server needs the headroom
   wifiMode = WIFI_MODE_STA;
   if (connectWiFi()) {
     start_file_browser();
@@ -639,6 +653,12 @@ void wifiDisable(int val) {
     serverRunning = false;
   }
   disconnectWiFi();
+  setCpuFrequencyMhz(80);   // back to the normal operating clock
+}
+
+// Used by the web UI's Sandbox page (declared in webserver.h)
+uint32_t webGetDevAddr() {
+  return node.getDevAddr();
 }
 
 // check if the battery has enough juice
@@ -1148,10 +1168,12 @@ void handleSerialNmea() {
     analogWrite(LED_B, 128);
   }
   while (Serial1.available()) {
+    char c = Serial1.read();
     if(printGNSS) {
-      Serial.print((char)Serial1.peek());
+      Serial.print(c);
     }
-    gps.encode(Serial1.read());
+    sendNmeaByte(c);      // feeds the Sandbox page's NMEA stream (no-op if nobody listens)
+    gps.encode(c);
   }
   analogWrite(LED_B, 0);
 
@@ -1591,5 +1613,13 @@ void loop() {
 
   if(Serial1.available())
     handleSerialNmea();
+
+  if(wifiMode != WIFI_MODE_NULL) {
+    otaLoop();                    // reboots shortly after a successful OTA upload
+    if(webAccelPending) {
+      webAccelPending = false;
+      sendAccelEvent();
+    }
+  }
   
 }

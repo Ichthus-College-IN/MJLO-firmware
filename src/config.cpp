@@ -54,9 +54,9 @@ const SettingMetadata settingsMetadata[] = {
   { "snwksintkey",  "SNwkSIntKey",   GROUP_ACTIVATION_ABP,  "",       validateHex32 },
   
   // 2.4GHz WiFi Settings
-  { "name",         "Name",          GROUP_WIFI_2G4,        "LRF-1",  validateName },
-  { "ssid",         "SSID",          GROUP_WIFI_2G4,        "LoRangeFinder-1", validateSSID },
-  { "pass",         "Pass",          GROUP_WIFI_2G4,        "L0R4ngeF1nder",   validatePassword },
+  { "name",         "Name",          GROUP_WIFI_2G4,        "SensorBox", validateName },
+  { "ssid",         "SSID",          GROUP_WIFI_2G4,        "SensorBox", validateSSID },
+  { "pass",         "Pass",          GROUP_WIFI_2G4,        "S3ns0rB0x", validatePassword },
   { "user",         "User",          GROUP_WIFI_2G4,        "",       validateUser },
   
   // Time Settings
@@ -324,7 +324,7 @@ String printConfig(int group) {
 String printFullConfig(bool inclVersion) {
   String ret = "";
   if (inclVersion) {
-    ret += ("\r\nMJLO by Steven @ Ichthus\r\nFirmware " MJLO_VERSION "\r\nCompiled " __DATE__ "\r\n");
+    ret += ("\r\nMJLO SensorBox by Steven @ Ichthus/Kroonos\r\nFirmware " MJLO_VERSION "\r\nCompiled " __DATE__ "\r\n");
   }
   for (int i = 0; i < GROUP_COUNT; i++) {
     ret += printConfig(i);
