@@ -61,9 +61,9 @@ void BLEConfigurator::start(String bleName) {
   
   // Create a BLE Service for TX/RX
   this->uartService  = this->pServer->createService(SERVICE_UUID_UART);    // create the BLE Service
-  this->txEndpoint   = this->uartService->createCharacteristic(CHARSTC_UUID_TX, BLECharacteristic::PROPERTY_WRITE);
+  this->txEndpoint   = this->uartService->createCharacteristic(CHARSTC_UUID_TX, BLECharacteristic::PROPERTY_READ);
   this->txEndpoint   ->setCallbacks(new BLECallbackWrite(*this));
-  this->rxEndpoint   = this->uartService->createCharacteristic(CHARSTC_UUID_RX, BLECharacteristic::PROPERTY_READ);    
+  this->rxEndpoint   = this->uartService->createCharacteristic(CHARSTC_UUID_RX, BLECharacteristic::PROPERTY_WRITE);    
   this->rxEndpoint   ->setValue("Enter a command in the TX field");
 
   this->readService  = this->pServer->createService(SERVICE_UUID_MAPQUEST);    // create the BLE Service
