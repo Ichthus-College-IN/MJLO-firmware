@@ -14,7 +14,8 @@ enum ErrorCode {
   keyError = 4,
   valueError = 5,
   busyError = 6,
-  NUM_ERRORS = 7
+  fileError = 7,
+  NUM_ERRORS = 8
 };
 
 // ============= Setting Metadata =============

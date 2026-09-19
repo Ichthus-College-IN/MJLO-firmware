@@ -89,9 +89,9 @@ void BLEConfigurator::stop() {
   this->uartService->stop();   // this makes the callback stop as well
   this->readService->stop();
   BLEDevice::deinit(false);
-  delete this->pServer;
-  delete this->uartService;
-  delete this->readService;
+  pServer     = nullptr;
+  uartService = nullptr;
+  readService = nullptr;
   delete this->txEndpoint;
   delete this->rxEndpoint;
   for (int i = 0; i < GROUP_COUNT; i++) {

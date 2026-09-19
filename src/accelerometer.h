@@ -31,7 +31,19 @@ void accelAnyMotion() {
   lsm6dsr_wkup_dur_set(&(lsm6dsr.reg_ctx), 0);
   lsm6dsr_act_sleep_dur_set(&(lsm6dsr.reg_ctx), 0);
 
+  // pulse INT per event rather than latching it until the source register is read
+  lsm6dsr_int_notification_set(&(lsm6dsr.reg_ctx), LSM6DSR_ALL_INT_PULSED);
+
+  // ACC_INT follows INT1, so unroute INT2 - this has to happen before
+  // arming INT1, because both setters rewrite the shared TAP_CFG2 interrupts_enable bit from
+  // their own pin only, and clearing INT2 last would switch all interrupts back off again
+  lsm6dsr_pin_int2_route_t int2val;
+  memset(&int2val, 0, sizeof(int2val));
+  lsm6dsr_pin_int2_route_set(&(lsm6dsr.reg_ctx), &int2val);
+
+  // the setter writes INT1_CTRL, MD1_CFG, EMB_FUNC_INT1 and FSM_INT1_A/B
   lsm6dsr_pin_int1_route_t int1val;
+  memset(&int1val, 0, sizeof(int1val));
   int1val.md1_cfg.int1_wu = PROPERTY_ENABLE;                // enable wake-up source on INT1 pin
   lsm6dsr_pin_int1_route_set(&(lsm6dsr.reg_ctx), &int1val); // configure the selected wake-up sources on INT1
 }

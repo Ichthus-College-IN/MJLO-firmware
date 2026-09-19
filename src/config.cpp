@@ -348,6 +348,8 @@ String parseError(int errorCode) {
       return "The specified value was not formatted correctly";
     case busyError:
       return "Uplink in progress - could not configure; try again later";
+    case fileError:
+      return "The specified file could not be found or read";
     default:
       return "An unknown error occured";
   }

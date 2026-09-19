@@ -13,9 +13,9 @@ void handleSerialUSB() {
     // read a single character
     char input = Serial.read();
 
-    // limit to 71 characters input, flush everything if exceeded
-    if (cmdSerial.length() > 71) {
-      Serial.printf("\r\nMaximum input length exceeded (71 characters)\r\n");
+    // limit to 127 characters input (room for +cat=<name>,<offset>,<length>), flush everything if exceeded
+    if (cmdSerial.length() > 127) {
+      Serial.printf("\r\nMaximum input length exceeded (127 characters)\r\n");
       Serial.flush();
       cmdSerial = "";
       continue;

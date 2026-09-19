@@ -335,13 +335,6 @@ void sendUplink() {
   int16_t window = node.sendReceive(frameUp, frameUpSize, fPort, frameDown, &frameDownSize, 
                                     cfg.uplink.confirmed, &eventUp, &eventDown);
   
-  uint8_t *persist = node.getBufferSession();
-  memcpy(LWsession, persist, RADIOLIB_LORAWAN_SESSION_BUF_SIZE);
-#if RADIOLIB_LORAWAN_NODE_R
-  persist = node.getBufferNodeR();
-  memcpy(LWnoder, persist, RADIOLIB_LORAWAN_NODER_BUF_SIZE);
-#endif
-  
   if(window < 0) {
     PRINTF("[LoRaWAN] Error while sending uplink: code %d\r\n", window);
   }
@@ -506,6 +499,10 @@ int execCommand(String &command) {
   }
   key.toLowerCase();
 
+  if (key == "cat") {
+    return(serialDumpFile(value));
+  }
+
   if (command.indexOf("=") > 0) {
     int state = doSetting(key, value);
     return state;
@@ -541,6 +538,9 @@ int execCommand(String &command) {
     }
     Serial.println("");
     setCpuFrequencyMhz(40);
+  } else
+  if (key == "ls") {
+    return(serialListFiles());
   } else
   if (key == "load") {
     loadConfig();
@@ -588,17 +588,22 @@ int execCommand(String &command) {
     ESP.restart();
   } else
   if (key == "accel") {
-    while(true) {
-      while(!digitalRead(ACC_INT) && Serial.available() < 5) {
+    while(Serial.available() < 5) {
+      if(!digitalRead(ACC_INT)) {
+        yield();
+        continue;
+      }
+
+      Serial.println("Motion");
+      isMotion = false;
+
+      // wait for the pulse to end, but never block on an interrupt that stays asserted
+      uint32_t start = millis();
+      while(digitalRead(ACC_INT) && millis() - start < 1000 && Serial.available() < 5) {
         yield();
       }
       if(digitalRead(ACC_INT)) {
-        Serial.println("Motion");
-        isMotion = false;
-        while(digitalRead(ACC_INT)) {
-          yield();
-        }
-      } else {
+        Serial.println("ACC_INT stuck high - check the interrupt routing");
         break;
       }
     }
@@ -1088,6 +1093,15 @@ void setup() {
   VextOn();
 
   spiST.begin(TFTEPD_SCK, TFTEPD_MISO, TFTEPD_MOSI, TFT_CS);            // SCK/CLK, MISO, MOSI, NSS/CS
+
+  // GxEPD2 presets DC and RST before calling pinMode() on them, which the ESP32 core rejects
+  // for pins that are not claimed as GPIO yet; claim them here so they idle high as intended
+  pinMode(TFTEPD_DC, OUTPUT);
+  digitalWrite(TFTEPD_DC, HIGH);
+  pinMode(TFTEPD_RST, OUTPUT);
+  digitalWrite(TFTEPD_RST, HIGH);
+  pinMode(EPD_BUSY, INPUT);
+
   epdDisplay.epd2.selectSPI(spiST, SPISettings(4000000, MSBFIRST, SPI_MODE0));
   epdDisplay.init(115200, true, 2, false);
   if(wakeup_reason < ESP_SLEEP_WAKEUP_EXT0) {
@@ -1149,8 +1163,7 @@ void setup() {
     }
   }
 
-  // this print (or maybe a delay?) is needed because otherwise ACC_INT would read and stay HIGH
-  Serial.printf("DeviceState: %d\n", (uint8_t)deviceState); 
+  Serial.printf("DeviceState: %d\n", (uint8_t)deviceState);
 
   // if we need to do GNSS or the device is just powered on, show the OLED display
   if(deviceState <= START_GNSS || wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
