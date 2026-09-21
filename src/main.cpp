@@ -26,7 +26,7 @@
 #include "soundsensor.h"
 #include "measurement.h"
 #include "webserver.h"
-#include "serial.h"
+#include "sercmd.h"
 #include "display.h"
 
 #include <SD.h>
@@ -556,11 +556,9 @@ int execCommand(String &command) {
     Serial.printf("DevAddr: %08X\n", node.getDevAddr());
   } else
   if (key == "wipecfg") {
-    for (uint16_t i = 0; i < NUM_SETTINGS_METADATA; i++) {
-      String key = String(settingsMetadata[i].key);
-      String val = "";
-      doSetting(key, val);  // set all commands to empty String
-    }
+    // One NVS transaction for the whole table, rather than reopening it once
+    // per setting the way the old loop did.
+    configMgr.resetAll();
     deviceState = JOIN;
   } else
   if (key == "wipelw") {
@@ -664,6 +662,79 @@ void wifiDisable(int val) {
 // Used by the web UI's Sandbox page (declared in webserver.h)
 uint32_t webGetDevAddr() {
   return node.getDevAddr();
+}
+
+// ============================================================
+// Serial console hooks (declared in sercmd.h)
+//
+// The console runs on this loop and reaches into the state machine through
+// these, rather than including lorawan.h - which defines its globals in the
+// header and can only be included once.
+// ============================================================
+
+// Anything that would disturb a transmission in progress answers EBUSY instead
+// of racing it; the radio is mid-frame and the RX windows are still to come.
+bool sercmdDeviceBusy() {
+  return deviceState == SENDRECEIVE;
+}
+
+void sercmdRequestUplink() {
+  if (deviceState == WAIT_GNSS) {
+    deviceState = SENDRECEIVE;
+  } else if (node.isActivated()) {
+    deviceState = START_PM;
+  } else if (deviceState == JOIN) {
+    uplinkASAP();
+  }
+}
+
+void sercmdRequestJoin() {
+  node.clearSession();
+  deviceState = JOIN;
+}
+
+void sercmdRequestSleep() {
+  turnOff();
+}
+
+void sercmdWipeLoRaWAN() {
+  store.begin("radiolib");
+  store.remove("nonces");
+  store.end();
+  node.clearSession();
+  deviceState = JOIN;
+}
+
+uint32_t sercmdDevAddr() {
+  return node.getDevAddr();
+}
+
+bool sercmdActivated() {
+  return node.isActivated();
+}
+
+// WIFI SET has already associated by the time this is called, so the radio is
+// usually up and only the server is missing; wifiEnable() would otherwise
+// spend another association attempt re-joining a network it is already on.
+void sercmdWifiUp() {
+  setCpuFrequencyMhz(240);
+  if (wifiMode == WIFI_MODE_NULL) {
+    wifiEnable();
+    return;
+  }
+  wifiAfterJoin();
+  if (!serverRunning) {
+    start_file_browser();
+    serverRunning = true;
+  }
+}
+
+void sercmdWifiDown() {
+  wifiDisable();
+}
+
+uint16_t sercmdBatteryMillivolts() {
+  return battMillivolts;
 }
 
 // check if the battery has enough juice
@@ -1171,6 +1242,25 @@ void setup() {
     setDisplayStyle(displayStyles[styleNum], true);
   }
 
+  // Bring WiFi and the dashboard up unattended when someone asked for it -
+  // serial provisioning does, on the grounds that credentials typed over the
+  // cable are meant to be used. Only on USB power: on battery the radio would
+  // both drain the cell and, because the SLEEP state stays awake while
+  // wifiMode is set, stop the unit sleeping at all.
+  if(cfg.wl2g4.autoStart && usbState) {
+    Serial.println("[WiFi] autowifi is set - bringing the dashboard up");
+    wifiEnable();
+  }
+
+  // Last, because commands are only served from loop(): @EVT READY means "the
+  // console is answering", and a client that hears it before setup() finishes
+  // would spend its first command on a port that cannot reply for another
+  // twenty seconds. A client arriving at a device that is already running
+  // never sees the event and probes with PING instead.
+  if(usbState) {
+    sercmdBegin();
+  }
+
   Serial.println("[Setup complete]");
 }
 
@@ -1621,8 +1711,8 @@ void loop() {
     }
   }
 
-  if(usbState && Serial.available())
-    handleSerialUSB();
+  if(usbState)
+    sercmdPoll();
 
   if(Serial1.available())
     handleSerialNmea();

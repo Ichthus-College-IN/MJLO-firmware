@@ -110,7 +110,6 @@ static const char PAGE_HOME[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
   <a href=/ class=cur>Settings</a>
   <a href=/sandbox>Sandbox</a>
   <a href=/files>Files</a>
-  <a href=/wifi>WiFi</a>
   <a href=/update>Update</a>
   <a href=/security>Security</a>
 )html" THEME_BTN R"html(</nav>
@@ -119,27 +118,28 @@ static const char PAGE_HOME[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
 <div id=cfg></div>
 </main>
 <script>
-const GRP={
-  'LoRaWAN':['version','method','relay','adr','dr','dbm','confirmed'],
-  'Operation':['interval','sleep','operation','timeout'],
-  'OTAA':['deveui','joineui','appkey','nwkkey'],
-  'ABP':['devaddr','appskey','nwksenckey','fnwksintkey','snwksintkey'],
-  'WiFi/BLE':['name','ssid','pass','user'],
-  'Time':['timezone','dst']
-};
-const PWD=new Set(['pass','appkey','nwkkey','appskey','nwksenckey','fnwksintkey','snwksintkey']);
+// Groups, labels, accepted values and which fields are secrets all come from
+// /api/config, which reads them off the firmware's settings table. Nothing
+// about the settings is duplicated here, so a new one shows up on its own.
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 async function load(){
   const c=await(await fetch('/api/config')).json();
+  const groups=[];
+  for(const s of c){
+    let g=groups.find(x=>x.name===s.group);
+    if(!g){g={name:s.group,items:[]};groups.push(g);}
+    g.items.push(s);
+  }
   let h='';
-  for(const[g,ks]of Object.entries(GRP)){
-    h+=`<div class=card><h3>${g}</h3>`;
-    for(const k of ks){
-      const v=(c[k]||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-      h+=`<div class=row><span class=lbl>${k}</span>`+
-         `<input type="${PWD.has(k)?'password':'text'}" id="f_${k}" value="${v}"`+
-         ` onkeydown="if(event.key==='Enter')save('${k}')">`+
-         `<button onclick="save('${k}')">Save</button>`+
-         `<span id="s_${k}" class=badge></span></div>`;
+  for(const g of groups){
+    h+=`<div class=card><h3>${esc(g.name)}</h3>`;
+    for(const s of g.items){
+      h+=`<div class=row><span class=lbl title="${esc(s.hint)}">${esc(s.name)}</span>`+
+         `<input type="${s.secret?'password':'text'}" id="f_${s.key}" value="${esc(s.value)}"`+
+         ` title="${esc(s.hint)}" placeholder="${esc(s.hint)}"`+
+         ` onkeydown="if(event.key==='Enter')save('${s.key}')">`+
+         `<button onclick="save('${s.key}')">Save</button>`+
+         `<span id="s_${s.key}" class=badge></span></div>`;
     }
     h+='</div>';
   }
@@ -164,7 +164,6 @@ static const char PAGE_SANDBOX[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
   <a href=/>Settings</a>
   <a href=/sandbox class=cur>Sandbox</a>
   <a href=/files>Files</a>
-  <a href=/wifi>WiFi</a>
   <a href=/update>Update</a>
   <a href=/security>Security</a>
 )html" THEME_BTN R"html(</nav>
@@ -233,7 +232,6 @@ static const char PAGE_FILES[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
   <a href=/>Settings</a>
   <a href=/sandbox>Sandbox</a>
   <a href=/files class=cur>Files</a>
-  <a href=/wifi>WiFi</a>
   <a href=/update>Update</a>
   <a href=/security>Security</a>
 )html" THEME_BTN R"html(</nav>
@@ -352,93 +350,6 @@ document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='
 load();
 </script></body></html>)html";
 
-static const char PAGE_WIFI[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
-<head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>SensorBox &middot; WiFi</title><link rel=stylesheet href=/style.css>)html" THEME_HEAD R"html(</head>
-<body>
-<nav>
-  <a href=/>Settings</a>
-  <a href=/sandbox>Sandbox</a>
-  <a href=/files>Files</a>
-  <a href=/wifi class=cur>WiFi</a>
-  <a href=/update>Update</a>
-  <a href=/security>Security</a>
-)html" THEME_BTN R"html(</nav>
-<main>
-<h2>WiFi</h2>
-<div class=card>
-  <h3>Current Connection</h3>
-  <div id=winfo style="font-size:13px;color:var(--mut)">Loading...</div>
-</div>
-<div class=card>
-  <h3>Scan Networks</h3>
-  <div class=row>
-    <button onclick="scan()">Scan</button>
-    <span id=sst style="color:var(--mut);font-size:12px"></span>
-  </div>
-  <table style="margin-top:8px">
-    <thead><tr><th>SSID</th><th>RSSI</th><th>Security</th><th></th></tr></thead>
-    <tbody id=nets></tbody>
-  </table>
-</div>
-<div class=card>
-  <h3>Provision</h3>
-  <div class=row><span class=lbl>SSID</span><input type=text id=pssid></div>
-  <div class=row><span class=lbl>Password</span><input type=password id=ppass></div>
-  <div class=row><span class=lbl>WPA2 User</span><input type=text id=puser placeholder="(leave empty for WPA2-PSK)"></div>
-  <div class=row>
-    <button onclick="provision()">Save Credentials</button>
-    <span id=pst class=badge></span>
-  </div>
-</div>
-</main>
-<script>
-async function loadInfo(){
-  try{
-    const d=await(await fetch('/api/wifi/info')).json();
-    document.getElementById('winfo').innerHTML=
-      'Mode: <b>'+d.mode+'</b> &nbsp; IP: <b>'+d.ip+'</b>'+(d.ssid?' &nbsp; SSID: <b>'+d.ssid+'</b>':'')+
-      (d.rssi?' &nbsp; RSSI: <b>'+d.rssi+' dBm</b>':'');
-  }catch(e){document.getElementById('winfo').textContent='Unavailable';}
-}
-async function scan(){
-  const sst=document.getElementById('sst');
-  const tb=document.getElementById('nets');
-  sst.textContent='Scanning...';
-  tb.innerHTML='';
-  for(let i=0;i<20;i++){
-    const r=await fetch('/api/wifi/scan');
-    if(r.status===200){
-      const ns=await r.json();
-      sst.textContent=ns.length+' network(s) found';
-      for(const n of ns){
-        const tr=document.createElement('tr');
-        tr.innerHTML=`<td>${n.ssid}</td><td>${n.rssi} dBm</td>`+
-          `<td>${n.secure?'🔒':''}</td>`+
-          `<td><button class=sec onclick="sel(${JSON.stringify(n.ssid)})">Select</button></td>`;
-        tb.appendChild(tr);
-      }
-      return;
-    }
-    await new Promise(r=>setTimeout(r,1000));
-  }
-  sst.textContent='Scan timed out';
-}
-function sel(s){document.getElementById('pssid').value=s;document.getElementById('ppass').focus();}
-async function provision(){
-  const p=new URLSearchParams({
-    ssid:document.getElementById('pssid').value,
-    pass:document.getElementById('ppass').value,
-    user:document.getElementById('puser').value
-  });
-  const r=await fetch('/api/wifi/provision',{method:'POST',body:p});
-  const el=document.getElementById('pst');
-  if(r.ok){el.className='badge ok';el.textContent='Saved';}
-  else{el.className='badge err';el.textContent=await r.text();}
-  setTimeout(()=>{el.textContent='';el.className='badge';},3000);
-}
-loadInfo();
-</script></body></html>)html";
 
 static const char PAGE_UPDATE[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
 <head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -448,7 +359,6 @@ static const char PAGE_UPDATE[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
   <a href=/>Settings</a>
   <a href=/sandbox>Sandbox</a>
   <a href=/files>Files</a>
-  <a href=/wifi>WiFi</a>
   <a href=/update class=cur>Update</a>
   <a href=/security>Security</a>
 )html" THEME_BTN R"html(</nav>
@@ -575,7 +485,6 @@ static const char PAGE_SECURITY[] PROGMEM = R"html(<!DOCTYPE html><html lang=en>
   <a href=/>Settings</a>
   <a href=/sandbox>Sandbox</a>
   <a href=/files>Files</a>
-  <a href=/wifi>WiFi</a>
   <a href=/update>Update</a>
   <a href=/security class=cur>Security</a>
 )html" THEME_BTN R"html(</nav>
@@ -660,47 +569,195 @@ load();
 // WiFi management
 // ============================================================
 
-bool connectWiFi() {
+// The radio's own account of why the last attempt ended, captured from the
+// driver event because WL_* status codes lump several causes together. It is
+// what lets serial provisioning tell "wrong passphrase" from "no such network"
+// instead of reporting a bare timeout for both.
+static volatile uint8_t _lastDisconnectReason = 0;
+static bool _wifiEventHooked = false;
+static bool _joinInFlight = false;
+
+uint8_t wifiLastDisconnectReason() { return _lastDisconnectReason; }
+
+static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED)
+    _lastDisconnectReason = info.wifi_sta_disconnected.reason;
+  else if (event == ARDUINO_EVENT_WIFI_STA_CONNECTED)
+    _lastDisconnectReason = 0;
+}
+
+WifiCredentials wifiStoredCredentials() {
+  WifiCredentials cred;
+  cred.ssid = cfg.wl2g4.ssid;
+  cred.pass = cfg.wl2g4.pass;
+  cred.eap = cfg.wl2g4.eap;
+  cred.user = cfg.wl2g4.user;
+  cred.identity = cfg.wl2g4.identity;
+  cred.phase2 = cfg.wl2g4.phase2;
+  cred.ca = cfg.wl2g4.ca;
+  return cred;
+}
+
+String wifiFallbackPass() {
+  const String &pw = cfg.wl2g4.pass;
+  if (cfg.wl2g4.eap == EAP_NONE && (pw.length() == 0 || (pw.length() >= 8 && pw.length() <= 63)))
+    return pw;
+  // An 802.1X password, or one too short to be a WPA passphrase. Raising the
+  // access point with it would either fail outright or leave it open, so fall
+  // back to the pair the box shipped with - which is what an operator looking
+  // for a stray SensorBox will try anyway.
+  const SettingMetadata *meta = configMgr.getMetadata("pass");
+  return meta ? String(meta->defaultValue) : String("");
+}
+
+static esp_eap_ttls_phase2_types phase2Type(uint8_t phase2) {
+  switch (phase2) {
+    case P2_MSCHAP: return ESP_EAP_TTLS_PHASE2_MSCHAP;
+    case P2_PAP:    return ESP_EAP_TTLS_PHASE2_PAP;
+    case P2_CHAP:   return ESP_EAP_TTLS_PHASE2_CHAP;
+    case P2_EAP:    return ESP_EAP_TTLS_PHASE2_EAP;
+    default:        return ESP_EAP_TTLS_PHASE2_MSCHAPV2;
+  }
+}
+
+// Apply the 802.1X settings to the supplicant. Everything here is global
+// driver state, so a previous network's leftovers have to be cleared on the
+// PSK path too — see the EAP_NONE branch in wifiJoin().
+static void applyEnterprise(const WifiCredentials &cred) {
+  const String &outer = cred.identity.length() ? cred.identity : cred.user;
+  esp_eap_client_set_identity((const unsigned char *)outer.c_str(), outer.length());
+  esp_eap_client_set_username((const unsigned char *)cred.user.c_str(), cred.user.length());
+  esp_eap_client_set_password((const unsigned char *)cred.pass.c_str(), cred.pass.length());
+
+  // PEAP's inner method is always MSCHAPv2; the setting only means anything
+  // for TTLS, and applying it to PEAP would be a lie in the reply.
+  if (cred.eap == EAP_TTLS) esp_eap_client_set_ttls_phase2_method(phase2Type(cred.phase2));
+
+  if (cred.ca == CA_BUNDLE) {
+    esp_eap_client_clear_ca_cert();
+    esp_eap_client_use_default_cert_bundle(true);
+  } else {
+    esp_eap_client_use_default_cert_bundle(false);
+    esp_eap_client_clear_ca_cert();
+  }
+
+  // Certificate dates cannot be checked: the clock starts at the epoch and is
+  // only set by GNSS or by the network this join is trying to reach. With
+  // ca=bundle the chain of trust is still verified, which is what rejects a
+  // self-signed certificate; a genuine but expired one is accepted.
+  esp_eap_client_set_disable_time_check(true);
+
+  esp_eap_client_clear_certificate_and_key();   // no EAP-TLS: see WIFI SET-ENT
+  esp_wifi_sta_enterprise_enable();
+}
+
+int wifiJoin(const WifiCredentials &cred, uint32_t timeoutMs) {
+  if (_joinInFlight) return WIFI_JOIN_BUSY;
+  _joinInFlight = true;
+
+  if (!_wifiEventHooked) {
+    WiFi.onEvent(onWifiEvent);
+    _wifiEventHooked = true;
+  }
+  _lastDisconnectReason = 0;
+
   wifiMode = WIFI_MODE_STA;
   WiFi.mode(wifiMode);
 
-  if (cfg.wl2g4.user == "") {
-    WiFi.begin(cfg.wl2g4.ssid.c_str(), cfg.wl2g4.pass.c_str());
+  // begin() with connect=false so the station configuration can be finished
+  // off below before the association starts. Arduino's own begin() has no way
+  // to express SAE, and patching the config after esp_wifi_connect() would be
+  // a race against the supplicant.
+  if (cred.eap == EAP_NONE) {
+    // Leftovers from a previous enterprise network would otherwise turn this
+    // into a silent EAP attempt on a network that has no idea what to do with
+    // one. The supplicant keeps them until they are cleared.
+    esp_wifi_sta_enterprise_disable();
+    esp_eap_client_clear_identity();
+    esp_eap_client_clear_username();
+    esp_eap_client_clear_password();
+    esp_eap_client_clear_ca_cert();
+    esp_eap_client_use_default_cert_bundle(false);
+    WiFi.begin(cred.ssid.c_str(), cred.pass.length() ? cred.pass.c_str() : NULL, 0, NULL, false);
   } else {
-    ESP_ERROR_CHECK(esp_eap_client_set_identity((uint8_t *)cfg.wl2g4.user.c_str(), strlen(cfg.wl2g4.user.c_str())));
-    ESP_ERROR_CHECK(esp_eap_client_set_password((uint8_t *)cfg.wl2g4.pass.c_str(), strlen(cfg.wl2g4.pass.c_str())));
-    ESP_ERROR_CHECK(esp_wifi_sta_enterprise_enable());
-    WiFi.begin(cfg.wl2g4.ssid.c_str());
+    applyEnterprise(cred);
+    WiFi.begin(cred.ssid.c_str(), NULL, 0, NULL, false);
   }
 
-  Serial.printf("[WiFi] Connecting to [%s]...\r\n", cfg.wl2g4.ssid.c_str());
-  uint8_t status = WiFi.waitForConnectResult(20000);
-  Serial.printf("[WiFi] Status: %d\r\n", status);
+  wifi_config_t conf;
+  if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK) {
+    // Protected Management Frames are mandatory for WPA3 and optional for
+    // WPA2. Capable-but-not-required is the setting that joins both.
+    conf.sta.pmf_cfg.capable = true;
+    conf.sta.pmf_cfg.required = false;
+    // Offer both SAE password-derivation methods. The driver's default is
+    // hunt-and-peck only, which a WPA3 access point configured for
+    // Hash-to-Element refuses outright.
+    conf.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    conf.sta.sae_h2e_identifier[0] = '\0';
+    // Opportunistic encryption, and only where it can apply: an open network
+    // with no credential of any kind. Asking for it on a PSK or 802.1X join
+    // would change nothing and is one more thing to go wrong.
+    conf.sta.owe_enabled = (cred.eap == EAP_NONE && cred.pass.length() == 0);
+    esp_wifi_set_config(WIFI_IF_STA, &conf);
+  }
 
-  switch (status) {
-    case WL_CONNECTED:
-      IP = WiFi.localIP();
-      break;
-    case WL_NO_SSID_AVAIL:
+  Serial.printf("[WiFi] Connecting to [%s]%s...\r\n", cred.ssid.c_str(),
+                cred.eap == EAP_NONE ? "" : (cred.eap == EAP_PEAP ? " via PEAP" : " via TTLS"));
+  esp_wifi_connect();
+
+  uint8_t status = WiFi.waitForConnectResult(timeoutMs);
+  Serial.printf("[WiFi] Status: %d, reason: %u\r\n", status, _lastDisconnectReason);
+
+  _joinInFlight = false;
+
+  if (status == WL_CONNECTED) {
+    IP = WiFi.localIP();
+    return WIFI_JOIN_OK;
+  }
+
+  // The reason code is the more reliable witness of the two: WL_DISCONNECTED
+  // covers everything from a bad passphrase to an access point that never
+  // answered, while the reason says which.
+  switch (_lastDisconnectReason) {
+    case WIFI_REASON_NO_AP_FOUND:
+      return WIFI_JOIN_NOTFOUND;
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_MIC_FAILURE:
+    case WIFI_REASON_ASSOC_FAIL:
+      return WIFI_JOIN_AUTH;
     default:
-      WiFi.disconnect(true);
-      wifiMode = WIFI_MODE_AP;
-      WiFi.mode(wifiMode);
-      WiFi.softAP(cfg.wl2g4.ssid.c_str(), cfg.wl2g4.pass.c_str());
-      IP = WiFi.softAPIP();
       break;
+  }
+  if (status == WL_NO_SSID_AVAIL) return WIFI_JOIN_NOTFOUND;
+  if (status == WL_CONNECT_FAILED) return WIFI_JOIN_AUTH;
+  return WIFI_JOIN_TIMEOUT;
+}
+
+bool connectWiFi() {
+  if (wifiJoin(wifiStoredCredentials(), 20000) != WIFI_JOIN_OK) {
+    // No network to join, so become one: the dashboard is still reachable and
+    // the unit is still configurable, which is the point of the fallback.
+    WiFi.disconnect(true);
+    wifiMode = WIFI_MODE_AP;
+    WiFi.mode(wifiMode);
+    WiFi.softAP(cfg.wl2g4.ssid.c_str(), wifiFallbackPass().c_str());
+    IP = WiFi.softAPIP();
   }
 
   Serial.printf("[WiFi] IP: %s\r\n", IP.toString().c_str());
+  wifiAfterJoin();
+  return true;
+}
 
-  // Start an async WiFi scan for the WiFi page
-  if (WiFi.scanComplete() == WIFI_SCAN_FAILED)
-    WiFi.scanNetworks(true, false);
-
+void wifiAfterJoin() {
+  // No speculative scan any more: it existed to prime the dashboard's WiFi
+  // page, which is gone. SCAN on the serial console starts its own.
   if (mdns_init() == ESP_OK)
     mdns_hostname_set(cfg.wl2g4.name.c_str());
-
-  return true;
 }
 
 void disconnectWiFi() {
@@ -816,6 +873,19 @@ void webResetPassword() {
   p.end();
 }
 
+// One secret guards both ways in, so the serial console asks here rather than
+// growing a password of its own. The comparison walks the whole string even
+// after a mismatch: over a serial port the timing is buried in the reply
+// latency anyway, but a password check that returns early is a habit worth not
+// having.
+bool webCheckPassword(const String &pw) {
+  String expected = getPassword();
+  if (pw.length() != expected.length()) return false;
+  uint8_t diff = 0;
+  for (uint16_t i = 0; i < expected.length(); i++) diff |= (uint8_t)(pw[i] ^ expected[i]);
+  return diff == 0;
+}
+
 // Session token = two 64-bit FNV-1a passes over device ID + current password,
 // hex-encoded. Stateless: changing the password changes the token, which
 // invalidates every outstanding session for free.
@@ -888,21 +958,45 @@ void sendAccelEvent() {
 // Route handlers
 // ============================================================
 
-// GET /api/config  — all settings as JSON object
+// GET /api/config  — every setting as a JSON array, value and metadata
+// together.
+//
+// The array is ordered and self-describing on purpose. The page used to carry
+// its own copy of the grouping and its own list of which fields are secrets,
+// which meant a setting added to config.cpp simply never appeared in the web
+// UI until someone remembered to add it here too. Now the table is the only
+// place that knows.
 static void handleConfigGet(AsyncWebServerRequest *req) {
   AsyncResponseStream *res = req->beginResponseStream(F("application/json"));
-  res->print('{');
+  res->print('[');
+  bool first = true;
   for (uint16_t i = 0; i < NUM_SETTINGS_METADATA; i++) {
-    if (i) res->print(',');
-    res->print('"');
-    res->print(settingsMetadata[i].key);
-    res->print(F("\":\""));
+    const SettingMetadata &m = settingsMetadata[i];
+    // The WiFi group is not the dashboard's business in either direction - see
+    // the note on GROUP_WIFI_2G4. Leaving it out of the listing is also what
+    // keeps the passphrase off the wire.
+    if (m.group == GROUP_WIFI_2G4) continue;
+    if (!first) res->print(',');
+    first = false;
+    res->print(F("{\"key\":\""));
+    jsonStr(res, m.key);
+    res->print(F("\",\"name\":\""));
+    jsonStr(res, m.displayName);
+    res->print(F("\",\"group\":\""));
+    jsonStr(res, settingGroupNames[m.group]);
+    res->print(F("\",\"type\":\""));
+    jsonStr(res, settingTypeNames[m.type]);
+    res->print(F("\",\"hint\":\""));
+    jsonStr(res, m.hint);
+    res->print(F("\",\"secret\":"));
+    res->print(m.secret ? F("true") : F("false"));
+    res->print(F(",\"value\":\""));
     // getByIndex() serves the cache and falls back to the metadata default,
     // so there is no need to open NVS here.
     jsonStr(res, configMgr.getByIndex(i).c_str());
-    res->print('"');
+    res->print(F("\"}"));
   }
-  res->print('}');
+  res->print(']');
   req->send(res);
 }
 
@@ -914,7 +1008,22 @@ static void handleConfigPost(AsyncWebServerRequest *req) {
   }
   String key = req->getParam("key")->value();
   String val = req->getParam("value")->value();
-  int err = doSetting(key, val);
+
+  // The WiFi group is not offered by the UI, which never lists it - this is
+  // the check that means it, for anything posting straight to the API. See the
+  // note on GROUP_WIFI_2G4 in config_manager.h.
+  const SettingMetadata *meta = configMgr.getMetadata(key.c_str());
+  if (meta && meta->group == GROUP_WIFI_2G4) {
+    req->send(403, F("text/plain"),
+              F("WiFi settings can only be changed over the serial console"));
+    return;
+  }
+
+  // A form field is taken literally: an empty box means an empty value, and
+  // the setting's own parser decides whether that is allowed. doSetting()'s
+  // "empty means restore the default" shorthand belongs to the '+' console,
+  // where there is no other way to express it.
+  int err = configMgr.set(key.c_str(), val);
   if (err == noError) req->send(200, F("text/plain"), F("OK"));
   else                req->send(400, F("text/plain"), parseError(err).c_str());
 }
@@ -1067,82 +1176,27 @@ static void handleCommand(AsyncWebServerRequest *req) {
     return;
   }
 
+  // A fixed list, not a pass-through. This used to hand whatever arrived
+  // straight to execCommand(), which accepts '+<key>=<value>' - so a request
+  // for "ssid=Elsewhere" was a complete way around every check above, and
+  // around the Sandbox page's own buttons. The page only ever sends these.
+  static const char *const allowed[] = { "uplink", "join", "restart" };
+  bool ok = false;
+  for (const char *a : allowed) {
+    if (c == a) { ok = true; break; }
+  }
+  if (!ok) {
+    req->send(403, F("text/plain"), F("Not an allowed command"));
+    return;
+  }
+
   String cmd = "+" + c;
   int err = execCommand(cmd);
   if (err == noError) req->send(200, F("text/plain"), F("OK"));
   else                req->send(400, F("text/plain"), parseError(err).c_str());
 }
 
-// GET /api/wifi/info
-static void handleWifiInfo(AsyncWebServerRequest *req) {
-  AsyncResponseStream *res = req->beginResponseStream(F("application/json"));
-  const char *mode = (wifiMode == WIFI_MODE_STA) ? "STA" :
-                     (wifiMode == WIFI_MODE_AP)  ? "AP"  : "NULL";
-  res->print(F("{\"mode\":\""));
-  res->print(mode);
-  res->print(F("\",\"ip\":\""));
-  res->print(IP.toString().c_str());
-  res->print(F("\",\"ssid\":\""));
-  if (wifiMode == WIFI_MODE_STA)
-    jsonStr(res, WiFi.SSID().c_str());
-  else if (wifiMode == WIFI_MODE_AP)
-    jsonStr(res, WiFi.softAPSSID().c_str());
-  char buf[32];
-  snprintf(buf, sizeof(buf), "\",\"rssi\":%d}", (wifiMode == WIFI_MODE_STA) ? WiFi.RSSI() : 0);
-  res->print(buf);
-  req->send(res);
-}
 
-// GET /api/wifi/scan  — 202 while scanning, 200+JSON when done
-static void handleWifiScan(AsyncWebServerRequest *req) {
-  int n = WiFi.scanComplete();
-  if (n == WIFI_SCAN_RUNNING) {
-    req->send(202, F("application/json"), F("[]"));
-    return;
-  }
-  if (n == WIFI_SCAN_FAILED) {
-    WiFi.scanNetworks(true, false);
-    req->send(202, F("application/json"), F("[]"));
-    return;
-  }
-  AsyncResponseStream *res = req->beginResponseStream(F("application/json"));
-  res->print('[');
-  for (int i = 0; i < n; i++) {
-    if (i) res->print(',');
-    res->print(F("{\"ssid\":\""));
-    jsonStr(res, WiFi.SSID(i).c_str());
-    char buf[32];
-    snprintf(buf, sizeof(buf), "\",\"rssi\":%d,\"secure\":%s}",
-             WiFi.RSSI(i),
-             WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "false" : "true");
-    res->print(buf);
-  }
-  res->print(']');
-  req->send(res);
-  WiFi.scanDelete();
-  WiFi.scanNetworks(true, false); // start next scan for subsequent requests
-}
-
-// POST /api/wifi/provision  — save SSID/pass/user
-static void handleWifiProvision(AsyncWebServerRequest *req) {
-  if (!req->hasParam("ssid", true) || !req->hasParam("pass", true)) {
-    req->send(400, F("text/plain"), F("Missing ssid/pass"));
-    return;
-  }
-  String ssid = req->getParam("ssid", true)->value();
-  String pass = req->getParam("pass", true)->value();
-  String user = req->hasParam("user", true) ? req->getParam("user", true)->value() : String("");
-
-  String ks = "ssid", kp = "pass", ku = "user";
-  int e1 = doSetting(ks, ssid);
-  int e2 = doSetting(kp, pass);
-  int e3 = doSetting(ku, user);
-
-  if (e1) { req->send(400, F("text/plain"), parseError(e1).c_str()); return; }
-  if (e2) { req->send(400, F("text/plain"), parseError(e2).c_str()); return; }
-  if (e3) { req->send(400, F("text/plain"), parseError(e3).c_str()); return; }
-  req->send(200, F("text/plain"), F("OK"));
-}
 
 // ============================================================
 // Auth API
@@ -1251,7 +1305,6 @@ void start_file_browser() {
   server.on("/",         HTTP_GET, [](AsyncWebServerRequest *req) { req->send(200, "text/html", PAGE_HOME);    });
   server.on("/sandbox",  HTTP_GET, [](AsyncWebServerRequest *req) { req->send(200, "text/html", PAGE_SANDBOX); });
   server.on("/files",    HTTP_GET, [](AsyncWebServerRequest *req) { req->send(200, "text/html", PAGE_FILES);   });
-  server.on("/wifi",     HTTP_GET, [](AsyncWebServerRequest *req) { req->send(200, "text/html", PAGE_WIFI);    });
   server.on("/login",    HTTP_GET, [](AsyncWebServerRequest *req) { req->send(200, "text/html", PAGE_LOGIN);   });
   server.on("/security", HTTP_GET, [](AsyncWebServerRequest *req) { req->send(200, "text/html", PAGE_SECURITY);});
 
@@ -1281,9 +1334,6 @@ void start_file_browser() {
   server.on("/api/command", HTTP_POST, handleCommand);
 
   // API — wifi
-  server.on("/api/wifi/info",      HTTP_GET,  handleWifiInfo);
-  server.on("/api/wifi/scan",      HTTP_GET,  handleWifiScan);
-  server.on("/api/wifi/provision", HTTP_POST, handleWifiProvision);
 
   // SSE event sources
   gnssEvents.onConnect([](AsyncEventSourceClient *c) {

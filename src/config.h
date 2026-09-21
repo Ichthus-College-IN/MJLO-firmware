@@ -7,10 +7,15 @@
 
 #include "helpers.h"
 #include "config_manager.h"
+#include "sercmd.h"
 
+// The firmware's own chatter, and the one thing the LOG command can quieten.
+// Output written straight to Serial elsewhere is unaffected, which is why the
+// serial protocol has clients ignore every line that does not start with '@'
+// rather than promising a silent port.
 #define PRINTF(format, ...) \
   do { \
-      Serial.printf(format "\r\n", ##__VA_ARGS__); \
+      if (serialLogLevel >= SERLOG_INFO) Serial.printf(format "\r\n", ##__VA_ARGS__); \
   } while (0)
 
 extern bool powerState;
@@ -98,11 +103,48 @@ struct CfgOperation {
   uint16_t timeout = 120;
 };
 
+// 802.1X outer method. EAP_NONE is what makes a network a PSK network: it is
+// the single flag everything branches on, rather than "is the username set",
+// which could not tell an enterprise network from a leftover field.
+enum EapMethod {
+  EAP_NONE = 0,
+  EAP_PEAP = 1,
+  EAP_TTLS = 2
+};
+
+// Inner method, EAP-TTLS only. PEAP always uses MSCHAPv2.
+enum EapPhase2 {
+  P2_MSCHAPV2 = 0,
+  P2_MSCHAP = 1,
+  P2_PAP = 2,
+  P2_CHAP = 3,
+  P2_EAP = 4
+};
+
+// Server certificate validation. There is no private-CA option: a PEM does not
+// fit through a line-oriented console, so it is the built-in bundle or nothing.
+enum EapCa {
+  CA_NONE = 0,
+  CA_BUNDLE = 1
+};
+
 struct Cfg2G4 {
   String name;
   String ssid;
+  // The PSK on a personal network, the inner 802.1X password on an enterprise
+  // one. One field, because a box is on one network at a time and two password
+  // boxes on the dashboard would only invite putting the wrong one in each.
   String pass;
-  String user;
+  String user;       // inner identity (username), 802.1X only
+  String identity;   // outer identity; empty means "use `user`"
+  uint8_t eap = EAP_NONE;
+  uint8_t phase2 = P2_MSCHAPV2;
+  uint8_t ca = CA_NONE;
+  // Bring WiFi (and the dashboard) up on its own at boot. Off by default:
+  // WiFi costs the radio, 240 MHz and the async server, which a battery unit
+  // should not pay unasked. Serial provisioning turns it on, because someone
+  // who just typed credentials over the cable plainly wants the link.
+  bool autoStart = false;
 };
 
 struct Config {
@@ -122,29 +164,44 @@ extern Config cfg;
 extern const SettingMetadata settingsMetadata[];
 extern const uint16_t NUM_SETTINGS_METADATA;
 
-// Compatibility wrapper functions for old code
+// Apply one setting by key; `value` empty means "restore the default".
+// `key` is matched case-insensitively.
 int doSetting(String &key, String &value);
+
 bool isValidGroupOTAA();
 bool isValidGroupABP();
 void loadConfig();
 String printConfig(int group);
 String printFullConfig(bool inclVersion);
 String parseError(int errorCode);
+
+// The legacy '+' console. Implemented in main.cpp, because most of what it
+// does is reach into the device state machine.
 int execCommand(String &command);
 
 // ============= Helper for parsing ranges =============
+// Splits "1,2,3" into `array`, returning the number of entries written, or 0
+// when the input is not a clean comma-separated list of numbers. The strictness
+// matters: these lists reach the radio, and a half-parsed one used to be
+// accepted by the validator and then quietly dropped on the way to `cfg`.
 template<typename T>
-uint8_t parseRange(String input, uint8_t size, T* array) {
-  char buffer[input.length() + 1];
-  input.toCharArray(buffer, sizeof(buffer));
-  char *token = strtok(buffer, ",");
-  int index = 0;
-  while (token != nullptr && index < size) {
-    array[index] = (T) atoi(token);
-    index++;
-    token = strtok(nullptr, ",");
+uint8_t parseRange(const String &input, uint8_t size, T *array) {
+  uint8_t index = 0;
+  int start = 0;
+  while (start <= (int)input.length() && index < size) {
+    int comma = input.indexOf(',', start);
+    String token = (comma < 0) ? input.substring(start) : input.substring(start, comma);
+    token.trim();
+    if (token.length() == 0) return 0;
+    for (uint16_t i = 0; i < token.length(); i++) {
+      if (i == 0 && (token[i] == '-' || token[i] == '+') && token.length() > 1) continue;
+      if (!isDigit(token[i])) return 0;
+    }
+    array[index++] = (T)token.toInt();
+    if (comma < 0) break;
+    start = comma + 1;
   }
-  return(index);
+  return index;
 }
 
 #endif
