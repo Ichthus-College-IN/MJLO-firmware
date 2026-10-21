@@ -3,11 +3,16 @@ Meet je Leefomgeving / Measure Your Living Environment firmware.
 This is a PlatformIO project corresponding to the boxes as used at https://www.meetjeleefomgeving.nl / https://www.measureyourlivingenvironment.com
 
 ## How to flash
+1. Clone this repository.
+1. Take note of the modifications listed below before proceeding.
 1. Connect your sensor box with a USB-A to USB-C cable. Note that USB-C to USB-C cables are unlikely to work, because the microcontroller does not implement any of the required software to handle this.
 1. Put the microcontroller into Download / bootloader mode. To do this, press and hold the USER button, then press and release the RST button while holding USER, and finally let go of the USER button.
 1. Select the `mjlo` environment in the bottom bar and build the project. The first time, this may take a few minutes as it installs the necessary components.
 1. From the PlatformIO extension tab, perform "Upload Filesystem Image". This is a necessary step.
 1. Finally, perform the "Upload" action.
+
+## Modifications
+1. The Adafruit ST7735 library comes with unnecessary dependencies, one of which actually bites the compilation of this project. Navigate to `.pio\libdeps\mjlo\Adafruit ST7735 and ST7789 Library\library.properties`, and change line 10 such that it only reads `depends=Adafruit GFX Library`, discarding the `Adafruit seesaw` and `SD` depdendencies. Subsequently, delete these directories from `.pio\libdeps\mjlo\`. 
 
 ## How to configure
 To configure a sensor box, connect to the box using a USB-A to USB-C cable. Recommended is to use PlatformIO's monitoring tool; however, other Serial tools such as TeraTerm or PuTTY are also likely to work. Please note: some tools do not properly support backspaces or do not handle newlines by default.
