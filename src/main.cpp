@@ -1159,7 +1159,8 @@ void setup() {
     Serial.println("No SD card.");
   }
 
-  radio.begin();                          // initialize SX1262 with default settings
+  ConfigLoRa_t cfgRadio;
+  radio.begin(cfgRadio);                          // initialize SX1262 with default settings
 
   VextOn();
 
