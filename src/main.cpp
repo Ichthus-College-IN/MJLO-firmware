@@ -431,8 +431,13 @@ void turnOff() {
 
   // handle Timer source if the device is enabled
   if(digitalRead(POWER) == HIGH && !powerIsLow) {
-    uint64_t timeToSleep = nextUplink - tNow - MEDIUM;
-    esp_sleep_enable_timer_wakeup(timeToSleep * 1000000ULL);
+    // wake up MEDIUM seconds early to measure; signed maths so that an uplink
+    // that is (nearly) due doesn't underflow into a ~136 year sleep
+    int64_t timeToSleep = (int64_t)nextUplink - (int64_t)tNow - MEDIUM;
+    if(timeToSleep < 1) {
+      timeToSleep = 1;
+    }
+    esp_sleep_enable_timer_wakeup((uint64_t)timeToSleep * 1000000ULL);
   }
 
   // handle EXT0 source (accelerometer)
@@ -1683,6 +1688,12 @@ void loop() {
         } else if(tNow + MEDIUM >= nextUplink) {
           deviceState = START_PM;
         }
+        break;
+      }
+      // the next measurement cycle has to start within MEDIUM seconds anyway
+      // (always the case for FAST/MEDIUM intervals), so sleeping is pointless
+      if(node.isActivated() && tNow + MEDIUM >= nextUplink) {
+        deviceState = START_PM;
         break;
       }
       VextOff();
